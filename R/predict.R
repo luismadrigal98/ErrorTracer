@@ -95,12 +95,18 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   }
 
   # --- 4. Perturbed linear predictor (environmental uncertainty) ---
-  lp_perturbed <- .compute_lp_perturbed(
-    draws_mat  = draws_mat[seq_len(n_perturb), , drop = FALSE],
-    newdata    = newdata,
-    pred_names = pred_names,
-    noise_sds  = noise_sds
-  )
+  # Short-circuit: if no predictor has noise, lp_perturbed == lp exactly,
+  # so env_var will be zero without running the perturbation loop.
+  lp_perturbed <- if (all(noise_sds == 0, na.rm = TRUE)) {
+    lp[seq_len(n_perturb), , drop = FALSE]
+  } else {
+    .compute_lp_perturbed(
+      draws_mat  = draws_mat[seq_len(n_perturb), , drop = FALSE],
+      newdata    = newdata,
+      pred_names = pred_names,
+      noise_sds  = noise_sds
+    )
+  }
 
   # --- 5. Credible intervals ---
   ci_df <- .compute_ci(pp, ci_levels)
@@ -273,7 +279,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
         apply(lp[seq_len(nrow(lp_perturbed)), , drop = FALSE], 2, stats::var),
       0
     ),
-    residual_var = stats::median(sigma_draws^2, na.rm = TRUE),
+    residual_var = mean(sigma_draws^2, na.rm = TRUE),
     stringsAsFactors = FALSE
   )
 }

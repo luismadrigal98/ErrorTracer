@@ -11,8 +11,10 @@
 #'     prediction uncertainty in the predictor values (estimated via
 #'     perturbation in \code{\link{et_predict}}).  Zero when
 #'     \code{env_noise = NULL}.}
-#'   \item{residual_var}{Posterior median of \eqn{\sigma^2} — biological
-#'     process noise, unmeasured drivers, and drift.}
+#'   \item{residual_var}{Posterior mean of \eqn{\sigma^2} — biological
+#'     process noise, unmeasured drivers, and drift. Using the mean (not
+#'     median) ensures \code{param_var + residual_var \approx total_var}
+#'     by the law of total variance.}
 #'   \item{total_var}{Variance of the full posterior predictive draws
 #'     (parameter + residual; note that \code{env_var} is an additive
 #'     component measured separately from the perturbation step).}
