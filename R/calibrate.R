@@ -210,6 +210,6 @@ et_diagnose.et_model_list <- function(model, loo = TRUE, ...) {
   list(
     convergence = convergence,
     loo         = loo_res,
-    summary     = brms::summary(fit)
+    summary     = summary(fit)
   )
 }
