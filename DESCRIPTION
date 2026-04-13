@@ -2,8 +2,10 @@ Package: ErrorTracer
 Type: Package
 Title: Bayesian Error Propagation and Forecast Uncertainty Decomposition
 Version: 0.1.0
-Authors@R: person("Madrigal-Roca", "Luis Javier", role = c("aut", "cre"),
-    email = "madrigalrocalj@yahoo.com")
+Authors@R: c(
+    person(given = "Luis Javier", family = "Madrigal-Roca", role = c("aut", "cre"), email = "madrigalrocalj@yahoo.com"),
+    person(given = "John", family = "Kelly", role = "aut", email = "jkk@ku.edu")
+  )
 Description: Provides a full pipeline from regularized or standard regression models
     (elastic net, lm, glm, ranger) to informed Bayesian priors, three-way
     forecast uncertainty decomposition (parameter / environmental / residual),
