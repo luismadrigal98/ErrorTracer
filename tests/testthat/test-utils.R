@@ -38,10 +38,19 @@ test_that("et_theme respects base_size", {
 
 # ── .resolve_env_noise edge cases ───────────────────────────────────────────
 
-test_that("resolve_env_noise handles predictor not in newdata gracefully", {
+test_that("resolve_env_noise scalar: missing predictor uses sd = 1 fallback", {
   nd  <- data.frame(Tmean = rnorm(4), PPT = rnorm(4))
-  # SWE is in pred_names but NOT in newdata — should default to zero
+  # SWE is in pred_names but NOT in newdata — fallback sd = 1, noise = 0.1 * 1
   res <- ErrorTracer:::.resolve_env_noise(0.1, c("Tmean", "PPT", "SWE"), nd)
+  expect_equal(res[["SWE"]], rep(0.1, 4), tolerance = 1e-10)
+})
+
+test_that("resolve_env_noise named list: omitted predictor stays zero", {
+  nd  <- data.frame(Tmean = rnorm(4), PPT = rnorm(4), SWE = rnorm(4))
+  # Only Tmean and PPT supplied — SWE defaults to zero
+  res <- ErrorTracer:::.resolve_env_noise(
+    list(Tmean = 0.5, PPT = 0.2), c("Tmean", "PPT", "SWE"), nd
+  )
   expect_true(all(res[["SWE"]] == 0))
 })
 
