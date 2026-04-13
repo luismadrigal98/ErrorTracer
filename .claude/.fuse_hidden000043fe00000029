@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(Rscript data-raw/generate_et_sim.R)"
-    ]
-  }
-}

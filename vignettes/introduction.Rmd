@@ -18,7 +18,7 @@ vignette: >
 knitr::opts_chunk$set(
   collapse  = TRUE,
   comment   = "#>",
-  eval      = FALSE,   # MCMC is too slow for automated builds; run interactively
+  eval      = TRUE,   # MCMC is too slow for automated builds; run interactively
   fig.width = 7,
   fig.height = 4.5
 )
