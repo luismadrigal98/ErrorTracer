@@ -52,7 +52,7 @@ suppressWarnings(
 test_that("et_fit returns an et_model with the correct structure", {
   expect_s3_class(.int_fit, "et_model")
   expect_true(inherits(.int_fit$fit, "brmsfit"))
-  expect_equal(.int_fit$n_obs, .n)
+  expect_equal(nrow(.int_fit$data), .n)
   expect_true(!is.null(.int_fit$prior_spec))
 })
 
