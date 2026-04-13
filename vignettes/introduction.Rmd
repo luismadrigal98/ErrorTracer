@@ -18,7 +18,7 @@ vignette: >
 knitr::opts_chunk$set(
   collapse  = TRUE,
   comment   = "#>",
-  eval      = TRUE,   # MCMC is too slow for automated builds; run interactively
+  eval      = FALSE,  # Stan/brms chunks are too slow for automated builds
   fig.width = 7,
   fig.height = 4.5
 )
@@ -855,7 +855,7 @@ spread (the disagreement among model runs) typically grows with the projection
 horizon.  The `env_noise` argument now accepts **per-row vectors** so you can
 pass growing noise SDs directly.
 
-```{r gcm-workflow}
+```{r gcm-workflow, eval = FALSE}
 # Suppose you have GCM ensemble-mean predictors for 2025-2075,
 # standardised using your training-period statistics.
 gcm_years <- 2025:2075
@@ -907,7 +907,7 @@ The per-row noise means that `decompose_uncertainty()` now shows `env_var`
 **increasing** across forecast years — directly capturing the epistemic
 uncertainty from the GCM ensemble spread.
 
-```{r gcm-decompose}
+```{r gcm-decompose, eval = FALSE}
 decomp_gcm <- decompose_uncertainty(pred_gcm)
 # env_var should be small in 2025 and growing toward 2075 as GCM spread
 # accumulates; param_var and residual_var remain roughly constant.
