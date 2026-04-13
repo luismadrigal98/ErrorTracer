@@ -13,6 +13,11 @@
 
 # testthat caches the environment per file, so we compute the fit at top level.
 skip_if_not_installed("brms")
+# covr 3.6.5 does not set NOT_CRAN, so skip_on_cran() would skip these tests
+# during coverage measurement.  Detect the covr subprocess and opt in.
+if (requireNamespace("covr", quietly = TRUE) && covr::in_covr()) {
+  Sys.setenv(NOT_CRAN = "true")
+}
 skip_on_cran()
 
 options(brms.backend = "rstan")
