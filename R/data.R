@@ -23,8 +23,12 @@
 #'         (original unit: mm).}
 #'       \item{SWE}{Numeric. Standardised peak snow water equivalent
 #'         (original unit: mm).}
-#'       \item{z_diff}{Numeric. Simulated standardised allele-frequency change
-#'         (the response variable).}
+#'       \item{z_diff}{Numeric. Simulated allele-frequency change on the
+#'         arcsin-sqrt scale (\eqn{\arcsin(\sqrt{f})} transformation).
+#'         This transformation is unbounded and has no fixed
+#'         [\eqn{-1}, 1] constraint; the plausible range should be derived
+#'         from the training data or from the theoretical bounds
+#'         (\eqn{[0,\, \pi/2]}\ on the arcsin scale).}
 #'     }
 #'   }
 #'   \item{\code{forecast}}{

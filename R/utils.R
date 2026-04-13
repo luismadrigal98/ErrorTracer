@@ -63,41 +63,63 @@ et_theme <- function(base_size = 12) {
 # Internal helpers for et_predict / decomposition
 # ============================================================
 
-# Normalise env_noise to a named list of per-predictor SDs.
-# If scalar, replicate for every predictor in pred_names.
-# If named list / named vector, validate names and fill missing with the
-# default (0 means no perturbation for that predictor).
+# Normalise env_noise to a named list of per-observation SD vectors.
+# Each element of the returned list has length n_obs, so every row of
+# newdata can have its own noise SD (enabling time-varying uncertainty).
+#
+# Accepted forms for env_noise:
+#   NULL                  — zero noise for all predictors
+#   scalar numeric        — fraction of each predictor's SD in newdata
+#   named scalar list/vec — fixed SD per predictor (constant across obs)
+#   named vector list     — per-row SDs; each entry must be length 1 or n_obs
 .resolve_env_noise <- function(env_noise, pred_names, newdata) {
-  if (is.null(env_noise)) {
-    noise_sds <- stats::setNames(rep(0, length(pred_names)), pred_names)
-    return(noise_sds)
-  }
+  n_obs <- nrow(newdata)
+  zeros <- stats::setNames(lapply(pred_names, function(p) rep(0, n_obs)),
+                           pred_names)
+
+  if (is.null(env_noise)) return(zeros)
 
   if (is.numeric(env_noise) && length(env_noise) == 1) {
-    # Scalar: apply as a fraction of each predictor's SD in newdata
-    noise_sds <- vapply(pred_names, function(p) {
-      if (p %in% colnames(newdata)) {
-        sd_p <- stats::sd(newdata[[p]], na.rm = TRUE)
-        if (is.na(sd_p) || sd_p < 1e-12) sd_p <- 1
-        env_noise * sd_p
-      } else {
-        0
-      }
-    }, numeric(1))
-    return(noise_sds)
+    # Scalar fraction: scale by each predictor's empirical SD
+    result <- lapply(pred_names, function(p) {
+      sd_p <- if (p %in% colnames(newdata)) {
+        s <- stats::sd(newdata[[p]], na.rm = TRUE)
+        if (is.na(s) || s < 1e-12) 1 else s
+      } else 1
+      rep(env_noise * sd_p, n_obs)
+    })
+    return(stats::setNames(result, pred_names))
   }
 
-  # Named list or named numeric vector
-  env_noise <- unlist(env_noise)
-  noise_sds <- stats::setNames(rep(0, length(pred_names)), pred_names)
-  shared <- intersect(names(env_noise), pred_names)
-  noise_sds[shared] <- env_noise[shared]
-  if (length(shared) < length(names(env_noise))) {
-    unknown <- setdiff(names(env_noise), pred_names)
+  # Named list or named numeric vector (possibly with per-row vectors)
+  env_noise_list <- if (is.list(env_noise)) env_noise else as.list(env_noise)
+
+  unknown <- setdiff(names(env_noise_list), pred_names)
+  if (length(unknown) > 0) {
     .et_warn("env_noise contains predictor(s) not in model: ",
              paste(unknown, collapse = ", "), " — ignored")
   }
-  noise_sds
+
+  result <- zeros
+  shared <- intersect(names(env_noise_list), pred_names)
+
+  for (p in shared) {
+    v <- as.numeric(env_noise_list[[p]])
+    if (length(v) == 1L) {
+      result[[p]] <- rep(v, n_obs)
+    } else if (length(v) == n_obs) {
+      result[[p]] <- v
+    } else {
+      stop(
+        "env_noise[[\"", p, "\"]] has length ", length(v),
+        " but newdata has ", n_obs, " row(s). ",
+        "Supply a scalar (constant noise) or a vector of length n_obs ",
+        "(time-varying noise)."
+      )
+    }
+  }
+
+  result
 }
 
 # Extract the names of fixed-effect predictors (excludes Intercept) from a

@@ -49,6 +49,12 @@
 #'   ratio vs.\ time) required to attempt extrapolation when all periods
 #'   are informative.  Below this value the shelf life is reported as a
 #'   lower bound only.  Default \code{1e-4}.
+#' @param max_extrapolation_factor Numeric.  Cap on how far the linear
+#'   projection may reach beyond the observed window.  If the projected
+#'   crossing time exceeds
+#'   \code{max(time) + max_extrapolation_factor × (max(time) − min(time))},
+#'   the result is reported as a lower bound instead of a projection.
+#'   Set to \code{Inf} to disable the cap.  Default \code{10}.
 #' @param ... Unused.
 #'
 #' @return An \code{et_shelf_life} object (a \code{data.frame}) with columns:
@@ -75,12 +81,19 @@
 #' @examples
 #' \dontrun{
 #' # Derive plausible_range from the training response
+#' # (arcsin-sqrt transformed allele frequencies are unbounded — use data range)
 #' sl <- shelf_life(pred,
-#'                  plausible_range = range(train_df$z_diff),
-#'                  ci_level   = 0.90,
-#'                  threshold  = 1.0,
-#'                  time_col   = "year")
+#'                  plausible_range          = range(train_df$z_diff),
+#'                  ci_level                 = 0.90,
+#'                  threshold                = 1.0,
+#'                  time_col                 = "year",
+#'                  max_extrapolation_factor = 10)
 #' print(sl)
+#'
+#' # Allow longer projections (or disable cap entirely):
+#' sl2 <- shelf_life(pred,
+#'                   plausible_range          = range(train_df$z_diff),
+#'                   max_extrapolation_factor = Inf)
 #' }
 #' @export
 shelf_life <- function(predictions,
@@ -89,6 +102,7 @@ shelf_life <- function(predictions,
                        threshold                 = 1.0,
                        time_col                  = NULL,
                        min_slope_for_projection  = 1e-4,
+                       max_extrapolation_factor  = 10,
                        ...) {
   UseMethod("shelf_life")
 }
@@ -100,6 +114,7 @@ shelf_life.et_prediction <- function(predictions,
                                      threshold                = 1.0,
                                      time_col                 = NULL,
                                      min_slope_for_projection = 1e-4,
+                                     max_extrapolation_factor = 10,
                                      ...) {
   .compute_shelf_life_single(
     predictions              = predictions,
@@ -107,7 +122,8 @@ shelf_life.et_prediction <- function(predictions,
     ci_level                 = ci_level,
     threshold                = threshold,
     time_col                 = time_col,
-    min_slope_for_projection = min_slope_for_projection
+    min_slope_for_projection = min_slope_for_projection,
+    max_extrapolation_factor = max_extrapolation_factor
   )
 }
 
@@ -118,6 +134,7 @@ shelf_life.et_prediction_list <- function(predictions,
                                           threshold                = 1.0,
                                           time_col                 = NULL,
                                           min_slope_for_projection = 1e-4,
+                                          max_extrapolation_factor = 10,
                                           ...) {
   horizon_by_group <- list()
 
@@ -127,7 +144,7 @@ shelf_life.et_prediction_list <- function(predictions,
 
     sl <- .compute_shelf_life_single(
       pred, plausible_range, ci_level, threshold,
-      time_col, min_slope_for_projection
+      time_col, min_slope_for_projection, max_extrapolation_factor
     )
     horizon_by_group[[g]] <<- attr(sl, "horizon")
     cbind(data.frame(group = g, stringsAsFactors = FALSE), sl)
@@ -151,7 +168,8 @@ shelf_life.default <- function(predictions, ...) {
 
 .compute_shelf_life_single <- function(predictions, plausible_range,
                                         ci_level, threshold, time_col,
-                                        min_slope_for_projection) {
+                                        min_slope_for_projection,
+                                        max_extrapolation_factor = 10) {
   ci_df       <- predictions$credible_intervals
   avail_levels <- unique(ci_df$ci_level)
 
@@ -189,7 +207,8 @@ shelf_life.default <- function(predictions, ...) {
   )
 
   # Compute shelf life horizon
-  horizon <- .compute_horizon(result_df, threshold, min_slope_for_projection)
+  horizon <- .compute_horizon(result_df, threshold, min_slope_for_projection,
+                              max_extrapolation_factor)
 
   result <- structure(result_df, class = c("et_shelf_life", "data.frame"))
   attr(result, "horizon")   <- horizon
@@ -201,7 +220,8 @@ shelf_life.default <- function(predictions, ...) {
 # Internal: derive horizon from a single-group shelf-life table
 # ============================================================
 
-.compute_horizon <- function(sl_df, threshold, min_slope) {
+.compute_horizon <- function(sl_df, threshold, min_slope,
+                             max_extrapolation_factor = 10) {
   times       <- sl_df$time
   ratios      <- sl_df$ratio
   informative <- sl_df$informative
@@ -231,6 +251,27 @@ shelf_life.default <- function(predictions, ...) {
 
     if (!is.na(slope) && slope > min_slope) {
       proj <- (threshold - b0) / slope
+
+      # Cap extrapolation: if projection exceeds last_ok + factor × window,
+      # the trend is too flat to give a meaningful estimate — report lower bound.
+      window   <- max(times) - min(times)
+      cap_time <- max(times) + max_extrapolation_factor * window
+
+      if (is.finite(max_extrapolation_factor) && proj > cap_time) {
+        return(list(
+          value            = NA_real_,
+          type             = "lower_bound",
+          last_informative = last_ok,
+          description      = paste0(
+            "All ", nrow(sl_df), " forecast periods informative. ",
+            "Linear trend (slope = ", round(slope, 5), " per time unit) ",
+            "projects threshold crossing at ~", round(proj, 1),
+            ", but this exceeds the extrapolation cap (",
+            round(cap_time, 1), "). Shelf life > ", last_ok, "."
+          )
+        ))
+      }
+
       return(list(
         value            = proj,
         type             = "projected",

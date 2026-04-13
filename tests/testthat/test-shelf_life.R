@@ -102,3 +102,54 @@ test_that("shelf_life plausible_range column is constant (scalar diff)", {
   sl   <- shelf_life(pred, plausible_range = c(-2, 2))
   expect_true(all(sl$plausible_range == 4))
 })
+
+# ── Horizon attribute tests ──────────────────────────────────────────────────
+
+test_that("horizon type is 'observed' when threshold crossed in window", {
+  # widths grow 0.2 → 1.4 over 6 obs; threshold = 0.5 => crossed early
+  pred <- .mock_pred_for_sl(n_obs = 6)
+  sl   <- shelf_life(pred, plausible_range = c(-1, 1), threshold = 0.5)
+  hor  <- attr(sl, "horizon")
+  expect_equal(hor$type, "observed")
+  expect_true(is.numeric(hor$value) && !is.na(hor$value))
+})
+
+test_that("horizon type is 'lower_bound' when all informative and trend flat", {
+  # Constant widths => zero slope => lower bound
+  pred <- .mock_pred_for_sl(n_obs = 6, ci_widths = rep(0.2, 6))
+  sl   <- shelf_life(pred, plausible_range = c(-1, 1), threshold = 1.0)
+  hor  <- attr(sl, "horizon")
+  expect_equal(hor$type, "lower_bound")
+  expect_true(is.na(hor$value))
+})
+
+test_that("horizon type is 'projected' when positive slope within cap", {
+  # Use many obs and a steep, clear trend so quantile-based widths reliably
+  # increase; large max_extrapolation_factor ensures projection is not capped.
+  pred <- .mock_pred_for_sl(n_obs = 10,
+                            ci_widths = seq(0.20, 0.90, length.out = 10))
+  sl   <- shelf_life(pred, plausible_range = c(-1, 1), threshold = 1.0,
+                     min_slope_for_projection = 1e-10,
+                     max_extrapolation_factor = Inf)
+  hor  <- attr(sl, "horizon")
+  expect_equal(hor$type, "projected")
+  # Projected value must be a finite number beyond the last observed time
+  expect_true(is.numeric(hor$value) && !is.na(hor$value) &&
+              hor$value > hor$last_informative)
+})
+
+test_that("max_extrapolation_factor cap converts projected to lower_bound", {
+  # Same gentle slope as above but cap = 0 => always lower bound
+  pred <- .mock_pred_for_sl(n_obs = 6, ci_widths = seq(0.1, 0.35, length.out = 6))
+  sl_cap <- shelf_life(pred, plausible_range = c(-1, 1), threshold = 1.0,
+                       min_slope_for_projection = 1e-10,
+                       max_extrapolation_factor = 0)
+  expect_equal(attr(sl_cap, "horizon")$type, "lower_bound")
+})
+
+test_that("horizon attribute has required fields", {
+  pred <- .mock_pred_for_sl(n_obs = 6)
+  sl   <- shelf_life(pred, plausible_range = c(-1, 1))
+  hor  <- attr(sl, "horizon")
+  expect_true(all(c("type", "value", "last_informative", "description") %in% names(hor)))
+})

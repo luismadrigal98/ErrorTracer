@@ -225,12 +225,17 @@ All components are guaranteed non-negative. Using the posterior mean of σ² (no
 `shelf_life()` computes the ratio of credible interval width to the plausible response range at each forecast time point, and flags when the forecast becomes uninformative:
 
 ```r
+# For arcsin-sqrt transformed responses, derive range from training data:
+#   plausible_range = range(train_df$z_diff)
+# For bounded responses, supply explicit bounds:
+#   plausible_range = c(lower, upper)
 sl <- shelf_life(
-  predictions     = pred,
-  plausible_range = c(-1, 1),  # biologically plausible bounds on the response
-  ci_level        = 0.90,      # must be present in the et_prediction object
-  threshold       = 1.0,       # CI/range ratio above which forecast is uninformative
-  time_col        = "year"     # column in newdata to use as time axis
+  predictions              = pred,
+  plausible_range          = range(train_df$z_diff),
+  ci_level                 = 0.90,   # must be present in the et_prediction object
+  threshold                = 1.0,    # CI/range ratio above which forecast is uninformative
+  time_col                 = "year", # column in newdata to use as time axis
+  max_extrapolation_factor = 10      # cap on linear projection beyond observed window
 )
 
 print(sl)
@@ -371,13 +376,16 @@ pred <- et_predict(
 # 5. Decompose uncertainty
 decomp <- decompose_uncertainty(pred)
 
-# 6. Assess forecast shelf life (2-year plausible allele frequency change)
+# 6. Assess forecast shelf life
+# For arcsin-sqrt responses use the observed training range; for bounded
+# responses supply explicit bounds.
 sl <- shelf_life(
   pred,
-  plausible_range = c(-1, 1),
-  ci_level        = 0.90,
-  threshold       = 1.0,
-  time_col        = "year"
+  plausible_range          = range(train_df$z_diff),
+  ci_level                 = 0.90,
+  threshold                = 1.0,
+  time_col                 = "year",
+  max_extrapolation_factor = 10
 )
 
 # 7. Calibrate (if validation data available)
@@ -420,8 +428,11 @@ pred_list <- et_predict(
 
 # Per-group decomposition and shelf life
 decomp_all <- decompose_uncertainty(pred_list)
-sl_all     <- shelf_life(pred_list, plausible_range = c(-1, 1),
-                         ci_level = 0.90, time_col = "year")
+sl_all     <- shelf_life(pred_list,
+                         plausible_range          = range(train_df$z_diff),
+                         ci_level                 = 0.90,
+                         time_col                 = "year",
+                         max_extrapolation_factor = 10)
 
 # Per-group diagnostics summary
 diag_list  <- et_diagnose(fit_list)

@@ -20,12 +20,19 @@
 #' @param env_noise Environmental measurement / prediction uncertainty.
 #'   Can be:
 #'   \itemize{
-#'     \item A named \code{list} or named numeric vector: per-predictor
-#'       absolute noise SDs, e.g.\
-#'       \code{list(Tmean = 0.5, PPT = 10)}.
-#'     \item A single numeric: applied as a fraction of each predictor's
-#'       empirical SD in \code{newdata} (e.g.\ \code{0.1} means 10\% noise).
 #'     \item \code{NULL} (default): no environmental noise.
+#'     \item A single numeric: applied as a fraction of each predictor's
+#'       empirical SD in \code{newdata} (e.g.\ \code{0.1} means 10\% noise,
+#'       constant across all observations).
+#'     \item A named \code{list} or named numeric vector with one scalar per
+#'       predictor: constant absolute noise SD per predictor, e.g.\
+#'       \code{list(Tmean = 0.5, PPT = 10)}.
+#'     \item A named \code{list} where each entry is a \strong{numeric vector
+#'       of length \code{nrow(newdata)}}: \emph{time-varying} (per-row) noise
+#'       SDs.  Use this when predictor uncertainty grows with forecast horizon,
+#'       e.g.\ from a GCM ensemble spread that increases over time:
+#'       \code{list(Tmean = 0.30 + 0.01 * (years - base_year))}.
+#'       Entries not supplied default to zero (no noise for that predictor).
 #'   }
 #' @param n_draws Integer.  Number of posterior draws to use (default 2000;
 #'   capped at the number of draws available in the fit).
@@ -95,16 +102,19 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   }
 
   # --- 4. Perturbed linear predictor (environmental uncertainty) ---
-  # Short-circuit: if no predictor has noise, lp_perturbed == lp exactly,
-  # so env_var will be zero without running the perturbation loop.
-  lp_perturbed <- if (all(noise_sds == 0, na.rm = TRUE)) {
+  # Short-circuit: if every predictor's noise is identically zero for every
+  # observation, lp_perturbed == lp and env_var will be zero — skip the loop.
+  all_zero_noise <- all(vapply(noise_sds,
+                               function(v) all(v == 0, na.rm = TRUE),
+                               logical(1)))
+  lp_perturbed <- if (all_zero_noise) {
     lp[seq_len(n_perturb), , drop = FALSE]
   } else {
     .compute_lp_perturbed(
       draws_mat  = draws_mat[seq_len(n_perturb), , drop = FALSE],
       newdata    = newdata,
       pred_names = pred_names,
-      noise_sds  = noise_sds
+      noise_sds  = noise_sds   # named list of per-obs vectors
     )
   }
 
@@ -202,7 +212,8 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # draws_mat : [n_perturb x n_params] posterior draws
 # newdata   : data.frame of predictors
 # pred_names: character vector
-# noise_sds : named numeric vector of per-predictor noise SDs
+# noise_sds : named list; each element is a numeric vector of length n_obs
+#             giving the per-observation noise SD for that predictor.
 .compute_lp_perturbed <- function(draws_mat, newdata, pred_names, noise_sds) {
   n_perturb <- nrow(draws_mat)
   n_obs     <- nrow(newdata)
@@ -227,13 +238,14 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   for (i in seq_len(n_perturb)) {
     nd_p <- newdata
     for (p in pred_names) {
-      sd_p <- noise_sds[p]
-      if (!is.na(sd_p) && sd_p > 0) {
-        nd_p[[p]] <- nd_p[[p]] + stats::rnorm(n_obs, 0, sd_p)
+      sd_vec <- noise_sds[[p]]   # per-obs vector, length n_obs
+      if (!is.null(sd_vec) && any(sd_vec > 0, na.rm = TRUE)) {
+        # rnorm() accepts a vector 'sd' — each observation gets its own draw
+        nd_p[[p]] <- nd_p[[p]] + stats::rnorm(n_obs, mean = 0, sd = sd_vec)
       }
     }
-    xmat   <- as.matrix(nd_p[, avail_preds, drop = FALSE])
-    betas  <- draws_mat[i, avail_betas]
+    xmat        <- as.matrix(nd_p[, avail_preds, drop = FALSE])
+    betas       <- draws_mat[i, avail_betas]
     lp_mat[i, ] <- int_vals[i] + xmat %*% betas
   }
 
