@@ -74,3 +74,39 @@ test_that("residual_var is constant across observations (scalar sigma)", {
   # residual_var is median(sigma^2) — same for all obs
   expect_equal(length(unique(round(decomp$residual_var, 10))), 1L)
 })
+
+test_that("decompose_uncertainty.et_prediction_list returns grouped data.frame", {
+  p1 <- .mock_et_prediction(n_obs = 4)
+  p2 <- .mock_et_prediction(n_obs = 3)
+
+  pred_list <- structure(
+    list(
+      predictions = list(A = p1, B = p2),
+      grouping    = "cluster_id",
+      newdata     = data.frame(cluster_id = rep(c("A","B"), c(4,3)))
+    ),
+    class = "et_prediction_list"
+  )
+
+  decomp <- decompose_uncertainty(pred_list)
+  expect_true("group" %in% colnames(decomp))
+  expect_equal(nrow(decomp), 7L)
+  expect_equal(sort(unique(decomp$group)), c("A", "B"))
+})
+
+test_that("decompose_uncertainty.et_prediction_list skips NULL groups", {
+  p1 <- .mock_et_prediction(n_obs = 4)
+
+  pred_list <- structure(
+    list(
+      predictions = list(A = p1, B = NULL),
+      grouping    = "cluster_id",
+      newdata     = data.frame(cluster_id = rep("A", 4))
+    ),
+    class = "et_prediction_list"
+  )
+
+  decomp <- decompose_uncertainty(pred_list)
+  expect_equal(nrow(decomp), 4L)
+  expect_false("B" %in% decomp$group)
+})
