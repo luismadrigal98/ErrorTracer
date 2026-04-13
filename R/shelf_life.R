@@ -1,10 +1,10 @@
-# R/shelf_life.R — shelf_life(): forecast horizon / shelf life analysis
+# R/shelf_life.R -- shelf_life(): forecast horizon / shelf life analysis
 
 #' Compute the forecast shelf life
 #'
 #' Quantifies \emph{when} a forecast becomes uninformative by comparing the
 #' width of credible intervals to a plausible response range.  A forecast is
-#' uninformative when its CI width exceeds \code{threshold × plausible_range}.
+#' uninformative when its CI width exceeds \code{threshold * plausible_range}.
 #'
 #' The function operates in three modes depending on the available data and
 #' whether the uninformative threshold is crossed within the forecast window:
@@ -52,7 +52,7 @@
 #' @param max_extrapolation_factor Numeric.  Cap on how far the linear
 #'   projection may reach beyond the observed window.  If the projected
 #'   crossing time exceeds
-#'   \code{max(time) + max_extrapolation_factor × (max(time) − min(time))},
+#'   \code{max(time) + max_extrapolation_factor * (max(time) - min(time))},
 #'   the result is reported as a lower bound instead of a projection.
 #'   Set to \code{Inf} to disable the cap.  Default \code{10}.
 #' @param ... Unused.
@@ -81,7 +81,7 @@
 #' @examples
 #' \dontrun{
 #' # Derive plausible_range from the training response
-#' # (arcsin-sqrt transformed allele frequencies are unbounded — use data range)
+#' # (arcsin-sqrt transformed allele frequencies are unbounded -- use data range)
 #' sl <- shelf_life(pred,
 #'                  plausible_range          = range(train_df$z_diff),
 #'                  ci_level                 = 0.90,
@@ -241,7 +241,7 @@ shelf_life.default <- function(predictions, ...) {
     ))
   }
 
-  # --- Mode 2: all informative — try linear extrapolation ---
+  # --- Mode 2: all informative -- try linear extrapolation ---
   last_ok <- max(times)
 
   if (is.numeric(times) && length(times) >= 3) {
@@ -252,8 +252,8 @@ shelf_life.default <- function(predictions, ...) {
     if (!is.na(slope) && slope > min_slope) {
       proj <- (threshold - b0) / slope
 
-      # Cap extrapolation: if projection exceeds last_ok + factor × window,
-      # the trend is too flat to give a meaningful estimate — report lower bound.
+      # Cap extrapolation: if projection exceeds last_ok + factor * window,
+      # the trend is too flat to give a meaningful estimate -- report lower bound.
       window   <- max(times) - min(times)
       cap_time <- max(times) + max_extrapolation_factor * window
 
@@ -286,7 +286,7 @@ shelf_life.default <- function(predictions, ...) {
     }
   }
 
-  # --- Mode 3: no upward trend — lower bound only ---
+  # --- Mode 3: no upward trend -- lower bound only ---
   list(
     value            = NA_real_,
     type             = "lower_bound",
@@ -306,11 +306,11 @@ shelf_life.default <- function(predictions, ...) {
   if (is.null(hor)) return(NULL)
   switch(hor$type,
     observed    = paste0("~", hor$value,
-                         " (observed — threshold first exceeded)"),
+                         " (observed -- threshold first exceeded)"),
     projected   = paste0("~", round(hor$value, 1),
-                         " (projected — extrapolated beyond forecast window)"),
+                         " (projected -- extrapolated beyond forecast window)"),
     lower_bound = paste0("> ", hor$last_informative,
-                         " (lower bound — all periods informative, no trend)")
+                         " (lower bound -- all periods informative, no trend)")
   )
 }
 

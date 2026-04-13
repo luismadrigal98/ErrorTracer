@@ -10,6 +10,8 @@ shelf_life(
   ci_level = 0.9,
   threshold = 1,
   time_col = NULL,
+  min_slope_for_projection = 1e-04,
+  max_extrapolation_factor = 10,
   ...
 )
 }
@@ -17,54 +19,104 @@ shelf_life(
 \item{predictions}{An \code{et_prediction} or \code{et_prediction_list}.}
 
 \item{plausible_range}{Numeric vector of length 2 (\code{c(min, max)})
-giving the biologically / ecologically plausible range of the response
-(e.g.\ \code{c(-1, 1)} for allele frequency change, or derived from
-training data).  The effective range is \code{diff(plausible_range)}.}
+giving the plausible range of the response.  For unbounded responses
+(e.g.\ arcsin-transformed allele-frequency change) use
+\code{range(training_data$response)} or a biologically motivated interval.
+The effective range is \code{diff(plausible_range)}.}
 
-\item{ci_level}{Numeric.  The credible interval level to use for the
-shelf life calculation (default 0.90).  Must be present in the
-\code{et_prediction} object.}
+\item{ci_level}{Numeric.  The credible interval level to use (default
+0.90).  Must be present in the \code{et_prediction} object.}
 
-\item{threshold}{Numeric.  The ratio (CI width / plausible range) above
-which the forecast is declared uninformative (default 1.0).
-A threshold of 1.0 means "CI spans the entire plausible range."}
+\item{threshold}{Numeric.  CI width / plausible range above which the
+forecast is uninformative (default 1.0).}
 
-\item{time_col}{Character.  Optional name of a column in
-\code{predictions$newdata} to use as the time axis label (e.g.\
-\code{"year"} or \code{"Period"}).  If \code{NULL}, the observation
-index is used.}
+\item{time_col}{Character.  Optional column in
+\code{predictions$newdata} to use as the time axis.  If \code{NULL},
+observation index is used.}
+
+\item{min_slope_for_projection}{Numeric.  Minimum linear slope (of
+ratio vs.\ time) required to attempt extrapolation when all periods
+are informative.  Below this value the shelf life is reported as a
+lower bound only.  Default \code{1e-4}.}
+
+\item{max_extrapolation_factor}{Numeric.  Cap on how far the linear
+projection may reach beyond the observed window.  If the projected
+crossing time exceeds
+\code{max(time) + max_extrapolation_factor * (max(time) - min(time))},
+the result is reported as a lower bound instead of a projection.
+Set to \code{Inf} to disable the cap.  Default \code{10}.}
 
 \item{...}{Unused.}
 }
 \value{
 An \code{et_shelf_life} object (a \code{data.frame}) with columns:
   \describe{
-    \item{obs_id}{Observation index (integer).}
-    \item{time}{Time axis value (from \code{time_col} or obs_id).}
+    \item{obs_id}{Observation index.}
+    \item{time}{Time axis value.}
     \item{ci_width}{Width of the credible interval at \code{ci_level}.}
-    \item{plausible_range}{The effective plausible range (scalar).}
+    \item{plausible_range}{Effective plausible range (scalar).}
     \item{ratio}{CI width / plausible range.}
     \item{informative}{Logical; \code{TRUE} when ratio < threshold.}
   }
-  For grouped predictions, a \code{group} column is prepended.
+  For grouped predictions a \code{group} column is prepended.
+  The object carries three attributes that drive \code{print()}:
+  \describe{
+    \item{\code{horizon}}{Named list with elements \code{value},
+      \code{type} (\code{"observed"}, \code{"projected"}, or
+      \code{"lower_bound"}), \code{last_informative}, and
+      \code{description}.}
+    \item{\code{horizon_by_group}}{For grouped objects: named list of
+      per-group horizon lists.}
+    \item{\code{threshold}}{The threshold value used.}
+  }
 }
 \description{
-Quantifies \emph{when} forecasts become uninformative by comparing the
-width of credible intervals to a plausible range of the response variable.
-A forecast is considered uninformative when the CI width exceeds
-\code{threshold * plausible_range}.
+Quantifies \emph{when} a forecast becomes uninformative by comparing the
+width of credible intervals to a plausible response range.  A forecast is
+uninformative when its CI width exceeds \code{threshold * plausible_range}.
 }
 \details{
-This is the most novel concept in ErrorTracer and does not have a
-direct equivalent in any existing R package.
+The function operates in three modes depending on the available data and
+whether the uninformative threshold is crossed within the forecast window:
+
+\describe{
+  \item{\strong{Observed}}{The threshold is crossed within the
+    forecast/validation window.  The shelf life is the first time point
+    at which \code{ratio >= threshold}.}
+  \item{\strong{Projected}}{All forecast periods remain informative but
+    the CI/range ratio is trending upward.  A linear trend is fitted to
+    the ratios and extrapolated to estimate when the threshold would be
+    reached.}
+  \item{\strong{Lower bound}}{All forecast periods are informative with
+    no upward trend in the ratio.  The shelf life is reported as a lower
+    bound: \code{> last observed time}.}
+}
+
+The intended workflow is:
+\enumerate{
+  \item Fit the model (\code{\link{et_fit}}).
+  \item Predict on held-out data or a future time window
+    (\code{\link{et_predict}}).
+  \item Call \code{shelf_life()} on those predictions.
+  \item If the threshold is not crossed in the held-out window, the
+    \emph{projected} mode extrapolates the horizon automatically.
+}
 }
 \examples{
 \dontrun{
+# Derive plausible_range from the training response
+# (arcsin-sqrt transformed allele frequencies are unbounded -- use data range)
 sl <- shelf_life(pred,
-                 plausible_range = c(-1, 1),
-                 ci_level = 0.95,
-                 threshold = 1.0,
-                 time_col = "year")
+                 plausible_range          = range(train_df$z_diff),
+                 ci_level                 = 0.90,
+                 threshold                = 1.0,
+                 time_col                 = "year",
+                 max_extrapolation_factor = 10)
 print(sl)
+
+# Allow longer projections (or disable cap entirely):
+sl2 <- shelf_life(pred,
+                  plausible_range          = range(train_df$z_diff),
+                  max_extrapolation_factor = Inf)
 }
 }

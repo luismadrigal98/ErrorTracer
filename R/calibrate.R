@@ -1,4 +1,4 @@
-# R/calibrate.R — et_calibrate() and et_diagnose()
+# R/calibrate.R -- et_calibrate() and et_diagnose()
 
 # ============================================================
 # et_calibrate(): coverage probability assessment
@@ -183,11 +183,11 @@ et_diagnose.et_model_list <- function(model, loo = TRUE, ...) {
   )
 
   if (!convergence$rhat_all_ok) {
-    .et_warn("Rhat > 1.05 for some parameters — consider more iterations or ",
+    .et_warn("Rhat > 1.05 for some parameters -- consider more iterations or ",
              "reparametrization.")
   }
   if (divs > 0) {
-    .et_warn(divs, " divergent transitions — consider increasing adapt_delta.")
+    .et_warn(divs, " divergent transitions -- consider increasing adapt_delta.")
   }
 
   loo_res <- NULL

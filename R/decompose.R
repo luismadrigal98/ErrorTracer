@@ -13,7 +13,7 @@
 #'     \code{env_noise = NULL}.}
 #'   \item{residual_var}{Posterior mean of \eqn{\sigma^2} — biological
 #'     process noise, unmeasured drivers, and drift. Using the mean (not
-#'     median) ensures \code{param_var + residual_var \approx total_var}
+#'     median) ensures \code{param_var + residual_var} \eqn{\approx}{~} \code{total_var}
 #'     by the law of total variance.}
 #'   \item{total_var}{Variance of the full posterior predictive draws
 #'     (parameter + residual; note that \code{env_var} is an additive

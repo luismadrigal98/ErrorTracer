@@ -1,4 +1,13 @@
-# R/utils.R — Internal utilities, logging, theming, numeric helpers
+# R/utils.R -- Internal utilities, logging, theming, numeric helpers
+
+# ============================================================
+# Package-level imports
+# ============================================================
+
+#' @importFrom stats coef lm sd setNames quantile median var rnorm
+#' @importFrom utils head
+#' @importFrom rlang .data
+NULL
 
 # ============================================================
 # Internal logging (not exported)
@@ -68,10 +77,10 @@ et_theme <- function(base_size = 12) {
 # newdata can have its own noise SD (enabling time-varying uncertainty).
 #
 # Accepted forms for env_noise:
-#   NULL                  — zero noise for all predictors
-#   scalar numeric        — fraction of each predictor's SD in newdata
-#   named scalar list/vec — fixed SD per predictor (constant across obs)
-#   named vector list     — per-row SDs; each entry must be length 1 or n_obs
+#   NULL                  -- zero noise for all predictors
+#   scalar numeric        -- fraction of each predictor's SD in newdata
+#   named scalar list/vec -- fixed SD per predictor (constant across obs)
+#   named vector list     -- per-row SDs; each entry must be length 1 or n_obs
 .resolve_env_noise <- function(env_noise, pred_names, newdata) {
   n_obs <- nrow(newdata)
   zeros <- stats::setNames(lapply(pred_names, function(p) rep(0, n_obs)),
@@ -97,7 +106,7 @@ et_theme <- function(base_size = 12) {
   unknown <- setdiff(names(env_noise_list), pred_names)
   if (length(unknown) > 0) {
     .et_warn("env_noise contains predictor(s) not in model: ",
-             paste(unknown, collapse = ", "), " — ignored")
+             paste(unknown, collapse = ", "), " -- ignored")
   }
 
   result <- zeros

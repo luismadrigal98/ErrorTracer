@@ -25,12 +25,19 @@ the grouping column.}
 \item{env_noise}{Environmental measurement / prediction uncertainty.
 Can be:
 \itemize{
-  \item A named \code{list} or named numeric vector: per-predictor
-    absolute noise SDs, e.g.\
-    \code{list(Tmean = 0.5, PPT = 10)}.
-  \item A single numeric: applied as a fraction of each predictor's
-    empirical SD in \code{newdata} (e.g.\ \code{0.1} means 10\% noise).
   \item \code{NULL} (default): no environmental noise.
+  \item A single numeric: applied as a fraction of each predictor's
+    empirical SD in \code{newdata} (e.g.\ \code{0.1} means 10\% noise,
+    constant across all observations).
+  \item A named \code{list} or named numeric vector with one scalar per
+    predictor: constant absolute noise SD per predictor, e.g.\
+    \code{list(Tmean = 0.5, PPT = 10)}.
+  \item A named \code{list} where each entry is a \strong{numeric vector
+    of length \code{nrow(newdata)}}: \emph{time-varying} (per-row) noise
+    SDs.  Use this when predictor uncertainty grows with forecast horizon,
+    e.g.\ from a GCM ensemble spread that increases over time:
+    \code{list(Tmean = 0.30 + 0.01 * (years - base_year))}.
+    Entries not supplied default to zero (no noise for that predictor).
 }}
 
 \item{n_draws}{Integer.  Number of posterior draws to use (default 2000;

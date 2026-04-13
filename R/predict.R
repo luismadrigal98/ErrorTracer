@@ -1,4 +1,4 @@
-# R/predict.R — et_predict(): posterior prediction with uncertainty propagation
+# R/predict.R -- et_predict(): posterior prediction with uncertainty propagation
 
 # ============================================================
 # S3 generic
@@ -103,7 +103,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
 
   # --- 4. Perturbed linear predictor (environmental uncertainty) ---
   # Short-circuit: if every predictor's noise is identically zero for every
-  # observation, lp_perturbed == lp and env_var will be zero — skip the loop.
+  # observation, lp_perturbed == lp and env_var will be zero -- skip the loop.
   all_zero_noise <- all(vapply(noise_sds,
                                function(v) all(v == 0, na.rm = TRUE),
                                logical(1)))
@@ -173,7 +173,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     }
     sub_nd <- newdata[newdata[[grouping]] == g, , drop = FALSE]
     if (nrow(sub_nd) == 0) {
-      .et_warn("No newdata rows for group ", g, " — skipping")
+      .et_warn("No newdata rows for group ", g, " -- skipping")
       next
     }
 
@@ -225,7 +225,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   avail_preds   <- sub("^b_", "", avail_betas)
 
   if (length(avail_betas) == 0) {
-    .et_warn("No beta columns found in draws matrix — returning zero LP.")
+    .et_warn("No beta columns found in draws matrix -- returning zero LP.")
     return(matrix(0, n_perturb, n_obs))
   }
 
@@ -240,7 +240,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     for (p in pred_names) {
       sd_vec <- noise_sds[[p]]   # per-obs vector, length n_obs
       if (!is.null(sd_vec) && any(sd_vec > 0, na.rm = TRUE)) {
-        # rnorm() accepts a vector 'sd' — each observation gets its own draw
+        # rnorm() accepts a vector 'sd' -- each observation gets its own draw
         nd_p[[p]] <- nd_p[[p]] + stats::rnorm(n_obs, mean = 0, sd = sd_vec)
       }
     }
