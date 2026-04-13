@@ -15,7 +15,7 @@ Description: Provides a full pipeline from regularized or standard regression mo
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
 Imports:
     brms (>= 2.20.0),
     loo (>= 2.6.0),
