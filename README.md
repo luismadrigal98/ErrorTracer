@@ -479,7 +479,6 @@ ErrorTracer/
 │   └── ecology.Rmd   # Phenology / species abundance example
 ├── DESCRIPTION
 ├── NAMESPACE
-└── CLAUDE.md
 ```
 
 ---
