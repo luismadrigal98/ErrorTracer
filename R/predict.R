@@ -41,6 +41,23 @@
 #' @param n_perturb Integer.  Number of draws used for the environmental
 #'   perturbation step (default \code{min(500, n_draws)}).  Reducing this
 #'   speeds up computation.
+#' @param interval_type Character.  Which draws to use when computing credible
+#'   intervals:
+#'   \itemize{
+#'     \item \code{"predictive"} (default): draws from \code{posterior_predict},
+#'       which include sigma (residual noise).  Use this when forecasting
+#'       \strong{individual observations} — e.g. a single population's allele
+#'       frequency, one site's ozone reading on a specific day.
+#'     \item \code{"linpred"}: draws from \code{posterior_linpred}, which
+#'       capture only parameter uncertainty (no sigma).  Use this when
+#'       forecasting the \strong{mean response} — e.g. the expected ozone
+#'       across many similar days, or mean Δf across replicate populations.
+#'       These intervals are always narrower; they will under-cover individual
+#'       observations unless sigma is negligible.
+#'   }
+#'   The decomposition components and \code{posterior_predict} /
+#'   \code{posterior_linpred} matrices are always computed regardless of this
+#'   setting.
 #' @param ... Passed to methods.
 #'
 #' @return An \code{et_prediction} object (list) containing:
@@ -66,7 +83,8 @@
 #' @export
 et_predict <- function(model, newdata, env_noise = NULL,
                         n_draws = 2000L, ci_levels = c(0.5, 0.8, 0.9, 0.95),
-                        n_perturb = NULL, ...) {
+                        n_perturb = NULL,
+                        interval_type = c("predictive", "linpred"), ...) {
   UseMethod("et_predict")
 }
 
@@ -78,8 +96,11 @@ et_predict <- function(model, newdata, env_noise = NULL,
 et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   n_draws = 2000L,
                                   ci_levels = c(0.5, 0.8, 0.9, 0.95),
-                                  n_perturb = NULL, ...) {
+                                  n_perturb = NULL,
+                                  interval_type = c("predictive", "linpred"),
+                                  ...) {
 
+  interval_type <- match.arg(interval_type)
   fit         <- model$fit
   pred_names  <- .brms_pred_names(fit)
   n_perturb   <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
@@ -119,7 +140,11 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   }
 
   # --- 5. Credible intervals ---
-  ci_df <- .compute_ci(pp, ci_levels)
+  # Route to posterior_predict (includes sigma) or posterior_linpred (no sigma)
+  # depending on interval_type. The underlying matrices are always stored for
+  # decomposition regardless.
+  ci_draws <- if (interval_type == "predictive") pp else lp
+  ci_df <- .compute_ci(ci_draws, ci_levels)
 
   # --- 6. Decomposition ---
   decomp <- .decompose_from_arrays(
@@ -131,16 +156,17 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
 
   structure(
     list(
-      posterior_predict = pp,
-      posterior_linpred = lp,
-      lp_perturbed      = lp_perturbed,
-      sigma_draws       = sigma_draws,
+      posterior_predict  = pp,
+      posterior_linpred  = lp,
+      lp_perturbed       = lp_perturbed,
+      sigma_draws        = sigma_draws,
       credible_intervals = ci_df,
-      decomposition     = decomp,
-      newdata           = newdata,
-      model             = model,
-      env_noise         = env_noise,
-      n_draws           = n_draws
+      decomposition      = decomp,
+      newdata            = newdata,
+      model              = model,
+      env_noise          = env_noise,
+      n_draws            = n_draws,
+      interval_type      = interval_type
     ),
     class = "et_prediction"
   )
@@ -154,7 +180,10 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
 et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       n_draws = 2000L,
                                       ci_levels = c(0.5, 0.8, 0.9, 0.95),
-                                      n_perturb = NULL, ...) {
+                                      n_perturb = NULL,
+                                      interval_type = c("predictive", "linpred"),
+                                      ...) {
+  interval_type <- match.arg(interval_type)
 
   grouping <- model$grouping
   if (!grouping %in% colnames(newdata)) {
@@ -179,12 +208,13 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 
     preds[[g]] <- tryCatch(
       et_predict.et_model(
-        model     = m,
-        newdata   = sub_nd,
-        env_noise = env_noise,
-        n_draws   = n_draws,
-        ci_levels = ci_levels,
-        n_perturb = n_perturb,
+        model         = m,
+        newdata       = sub_nd,
+        env_noise     = env_noise,
+        n_draws       = n_draws,
+        ci_levels     = ci_levels,
+        n_perturb     = n_perturb,
+        interval_type = interval_type,
         ...
       ),
       error = function(e) {
@@ -303,9 +333,10 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 #' @export
 print.et_prediction <- function(x, ...) {
   cat("ErrorTracer prediction (et_prediction)\n")
-  cat("  Observations :", ncol(x$posterior_predict), "\n")
-  cat("  Draws        :", nrow(x$posterior_predict), "\n")
-  cat("  CI levels    :", paste(unique(x$credible_intervals$ci_level), collapse = ", "), "\n")
+  cat("  Observations  :", ncol(x$posterior_predict), "\n")
+  cat("  Draws         :", nrow(x$posterior_predict), "\n")
+  cat("  CI levels     :", paste(unique(x$credible_intervals$ci_level), collapse = ", "), "\n")
+  cat("  Interval type :", if (is.null(x$interval_type)) "predictive" else x$interval_type, "\n")
   decomp <- x$decomposition
   cat("  Mean var decomposition (across observations):\n")
   cat(sprintf("    Parameter  : %.4f\n", mean(decomp$param_var)))

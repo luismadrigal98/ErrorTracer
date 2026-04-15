@@ -26,7 +26,12 @@
 #'     \item{nominal}{Same as ci_level.}
 #'     \item{observed_coverage}{Fraction of true values falling inside the CI.}
 #'     \item{n_obs}{Number of observations used.}
-#'     \item{calibration_error}{Absolute difference: |nominal - observed|.}
+#'     \item{calibration_error}{Signed difference: observed − nominal.
+#'       Positive = over-coverage (CIs too wide / conservative).
+#'       Negative = under-coverage (CIs too narrow / overconfident).}
+#'     \item{sharpness}{Mean CI width across observations.  Sharpness and
+#'       calibration are complementary: a model can be calibrated but useless
+#'       if sharpness is poor (very wide CIs).}
 #'   }
 #'   For grouped predictions, a \code{group} column is prepended.
 #' @examples
@@ -87,15 +92,16 @@ et_calibrate.et_prediction_list <- function(predictions, observed,
   levels_use <- if (is.null(ci_levels)) avail else intersect(ci_levels, avail)
 
   rows <- lapply(levels_use, function(lv) {
-    sub   <- ci_df[ci_df$ci_level == lv, ]
+    sub    <- ci_df[ci_df$ci_level == lv, ]
     inside <- y_true >= sub$lower & y_true <= sub$upper
-    cov   <- mean(inside, na.rm = TRUE)
+    cov    <- mean(inside, na.rm = TRUE)
     data.frame(
       ci_level           = lv,
       nominal            = lv,
       observed_coverage  = cov,
       n_obs              = sum(!is.na(inside)),
-      calibration_error  = abs(lv - cov),
+      calibration_error  = cov - lv,   # signed: + over-coverage, - under-coverage
+      sharpness          = mean(sub$width, na.rm = TRUE),
       stringsAsFactors   = FALSE
     )
   })
