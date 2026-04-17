@@ -1,16 +1,17 @@
-# R/priors.R — extract_priors(): regularized model → brms prior specification
+# R/priors.R — extract_priors(): regularized or standard regression model → 
+# brms prior specification
 
 # ============================================================
 # S3 generic
 # ============================================================
 
-#' Extract brms prior specification from a regularized model
+#' Extract brms prior specification from a regularized or standard regression model
 #'
 #' Converts a fitted model object into a \code{brms} prior specification
 #' suitable for \code{\link{et_fit}}.  The coefficient estimates (or
-#' importance weights for \pkg{ranger}) from the regularized fit are used as
+#' importance weights for \pkg{ranger}) from the regularized or standard fit are used as
 #' informative prior means, so the Bayesian model starts close to the
-#' regularized solution while remaining open to data-driven revision.
+#' regularized or standard solution while remaining open to data-driven revision.
 #'
 #' @param model A fitted model.  Supported classes:
 #'   \itemize{
@@ -65,19 +66,19 @@ extract_priors.lm <- function(model, multiplier = 2.0, min_sd = 0.1,
   if (nrow(coef_rows) == 0) stop("No non-intercept predictors found in lm model.")
 
   pred_names <- rownames(coef_rows)
-  coef_ests  <- coef_rows[, "Estimate"]
-  coef_ses   <- coef_rows[, "Std. Error"]
+  coef_ests <- coef_rows[, "Estimate"]
+  coef_ses <- coef_rows[, "Std. Error"]
 
   .build_prior_spec(
-    pred_names        = pred_names,
-    prior_means       = coef_ests,
-    prior_sds         = pmax(multiplier * coef_ses, min_sd),
-    coefs             = stats::setNames(coef_ests, pred_names),
-    method            = "lm",
-    multiplier        = multiplier,
-    min_sd            = min_sd,
+    pred_names = pred_names,
+    prior_means = coef_ests,
+    prior_sds = pmax(multiplier * coef_ses, min_sd),
+    coefs = stats::setNames(coef_ests, pred_names),
+    method = "lm",
+    multiplier = multiplier,
+    min_sd = min_sd,
     intercept_prior_sd = intercept_prior_sd,
-    sigma_prior_scale  = sigma_prior_scale
+    sigma_prior_scale = sigma_prior_scale
   )
 }
 
@@ -96,19 +97,19 @@ extract_priors.glm <- function(model, multiplier = 2.0, min_sd = 0.1,
   if (nrow(coef_rows) == 0) stop("No non-intercept predictors found in glm model.")
 
   pred_names <- rownames(coef_rows)
-  coef_ests  <- coef_rows[, "Estimate"]
-  coef_ses   <- coef_rows[, "Std. Error"]
+  coef_ests <- coef_rows[, "Estimate"]
+  coef_ses <- coef_rows[, "Std. Error"]
 
   .build_prior_spec(
-    pred_names        = pred_names,
-    prior_means       = coef_ests,
-    prior_sds         = pmax(multiplier * coef_ses, min_sd),
-    coefs             = stats::setNames(coef_ests, pred_names),
-    method            = "glm",
-    multiplier        = multiplier,
-    min_sd            = min_sd,
+    pred_names = pred_names,
+    prior_means = coef_ests,
+    prior_sds = pmax(multiplier * coef_ses, min_sd),
+    coefs = stats::setNames(coef_ests, pred_names),
+    method = "glm",
+    multiplier = multiplier,
+    min_sd = min_sd,
     intercept_prior_sd = intercept_prior_sd,
-    sigma_prior_scale  = sigma_prior_scale
+    sigma_prior_scale = sigma_prior_scale
   )
 }
 
@@ -131,11 +132,11 @@ extract_priors.cv.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
   lam_val <- model[[lambda]]
   coef_mat <- glmnet::coef.glmnet(model, s = lam_val)
   .extract_glmnet_coefs(
-    coef_mat          = coef_mat,
-    multiplier        = multiplier,
-    min_sd            = min_sd,
+    coef_mat  = coef_mat,
+    multiplier = multiplier,
+    min_sd = min_sd,
     intercept_prior_sd = intercept_prior_sd,
-    sigma_prior_scale  = sigma_prior_scale
+    sigma_prior_scale = sigma_prior_scale
   )
 }
 
@@ -162,9 +163,9 @@ extract_priors.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
   }
   coef_mat <- glmnet::coef.glmnet(model, s = lam_val)
   .extract_glmnet_coefs(
-    coef_mat          = coef_mat,
-    multiplier        = multiplier,
-    min_sd            = min_sd,
+    coef_mat = coef_mat,
+    multiplier = multiplier,
+    min_sd = min_sd,
     intercept_prior_sd = intercept_prior_sd,
     sigma_prior_scale  = sigma_prior_scale
   )
@@ -206,15 +207,15 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
   prior_means <- rep(0, length(pred_names))
 
   .build_prior_spec(
-    pred_names        = pred_names,
-    prior_means       = prior_means,
-    prior_sds         = prior_sds,
-    coefs             = NULL,          # no signed coefficients
-    method            = "ranger",
-    multiplier        = multiplier,
-    min_sd            = min_sd,
+    pred_names = pred_names,
+    prior_means = prior_means,
+    prior_sds = prior_sds,
+    coefs = NULL,          # no signed coefficients
+    method = "ranger",
+    multiplier = multiplier,
+    min_sd = min_sd,
     intercept_prior_sd = intercept_prior_sd,
-    sigma_prior_scale  = sigma_prior_scale
+    sigma_prior_scale = sigma_prior_scale
   )
 }
 
@@ -231,27 +232,27 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
 
   # Drop intercept and zero coefficients
   coef_vec <- coef_vec[names(coef_vec) != "(Intercept)"]
-  coef_nz  <- coef_vec[coef_vec != 0]
+  coef_nz <- coef_vec[coef_vec != 0]
 
   if (length(coef_nz) == 0) {
     stop("All glmnet coefficients are zero at the chosen lambda. ",
          "Try a smaller lambda (less regularisation).")
   }
 
-  pred_names  <- names(coef_nz)
+  pred_names <- names(coef_nz)
   prior_means <- as.numeric(coef_nz)
-  prior_sds   <- pmax(multiplier * abs(coef_nz), min_sd)
+  prior_sds <- pmax(multiplier * abs(coef_nz), min_sd)
 
   .build_prior_spec(
-    pred_names        = pred_names,
-    prior_means       = prior_means,
-    prior_sds         = prior_sds,
-    coefs             = stats::setNames(as.numeric(coef_nz), pred_names),
-    method            = "glmnet",
-    multiplier        = multiplier,
-    min_sd            = min_sd,
+    pred_names = pred_names,
+    prior_means = prior_means,
+    prior_sds = prior_sds,
+    coefs = stats::setNames(as.numeric(coef_nz), pred_names),
+    method = "glmnet",
+    multiplier = multiplier,
+    min_sd = min_sd,
     intercept_prior_sd = intercept_prior_sd,
-    sigma_prior_scale  = sigma_prior_scale
+    sigma_prior_scale = sigma_prior_scale
   )
 }
 
@@ -287,14 +288,14 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
 
   structure(
     list(
-      prior             = combined_prior,
-      pred_names        = pred_names,
-      coefs             = coefs,
-      method            = method,
-      multiplier        = multiplier,
-      min_sd            = min_sd,
+      prior = combined_prior,
+      pred_names = pred_names,
+      coefs = coefs,
+      method = method,
+      multiplier = multiplier,
+      min_sd = min_sd,
       intercept_prior_sd = intercept_prior_sd,
-      sigma_prior_scale  = sigma_prior_scale
+      sigma_prior_scale = sigma_prior_scale
     ),
     class = "et_prior_spec"
   )
