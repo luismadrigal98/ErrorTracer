@@ -45,16 +45,16 @@
 #' @export
 et_fit <- function(formula,
                    data,
-                   priors      = NULL,
-                   chains      = 4L,
-                   iter        = 2000L,
-                   warmup      = floor(iter / 2),
-                   cores       = min(chains, parallel::detectCores()),
-                   seed        = 42L,
+                   priors = NULL,
+                   chains = 4L,
+                   iter = 2000L,
+                   warmup = floor(iter / 2),
+                   cores = min(chains, parallel::detectCores()),
+                   seed = 42L,
                    adapt_delta = 0.95,
                    max_treedepth = 12L,
-                   grouping    = NULL,
-                   silent      = 2L,
+                   grouping = NULL,
+                   silent = 2L,
                    ...) {
 
   if (!is.null(grouping)) {
@@ -91,13 +91,13 @@ et_fit <- function(formula,
 
   fit <- brms::brm(
     formula = brms::bf(formula),
-    data    = data,
-    prior   = brms_prior,
-    chains  = chains,
-    iter    = iter,
-    warmup  = warmup,
-    cores   = cores,
-    seed    = seed,
+    data = data,
+    prior = brms_prior,
+    chains = chains,
+    iter = iter,
+    warmup = warmup,
+    cores = cores,
+    seed = seed,
     control = list(adapt_delta = adapt_delta, max_treedepth = max_treedepth),
     silent  = silent,
     refresh = 0,
@@ -106,13 +106,13 @@ et_fit <- function(formula,
 
   structure(
     list(
-      fit        = fit,
+      fit = fit,
       prior_spec = if (inherits(priors, "et_prior_spec")) priors else NULL,
-      formula    = formula,
-      data       = data,
-      config     = list(
+      formula = formula,
+      data = data,
+      config = list(
         chains = chains, iter = iter, warmup = warmup,
-        cores  = cores,  seed = seed,
+        cores = cores,  seed = seed,
         adapt_delta = adapt_delta, max_treedepth = max_treedepth
       )
     ),
