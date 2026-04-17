@@ -101,9 +101,9 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   ...) {
 
   interval_type <- match.arg(interval_type)
-  fit         <- model$fit
-  pred_names  <- .brms_pred_names(fit)
-  n_perturb   <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
+  fit <- model$fit
+  pred_names <- .brms_pred_names(fit)
+  n_perturb <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
 
   # Resolve environmental noise SDs
   noise_sds <- .resolve_env_noise(env_noise, pred_names, newdata)
