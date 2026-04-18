@@ -98,11 +98,11 @@
 #' @export
 shelf_life <- function(predictions,
                        plausible_range,
-                       ci_level                  = 0.90,
-                       threshold                 = 1.0,
-                       time_col                  = NULL,
-                       min_slope_for_projection  = 1e-4,
-                       max_extrapolation_factor  = 10,
+                       ci_level = 0.90,
+                       threshold = 1.0,
+                       time_col = NULL,
+                       min_slope_for_projection = 1e-4,
+                       max_extrapolation_factor = 10,
                        ...) {
   UseMethod("shelf_life")
 }
@@ -110,18 +110,18 @@ shelf_life <- function(predictions,
 #' @export
 shelf_life.et_prediction <- function(predictions,
                                      plausible_range,
-                                     ci_level                 = 0.90,
-                                     threshold                = 1.0,
-                                     time_col                 = NULL,
+                                     ci_level = 0.90,
+                                     threshold = 1.0,
+                                     time_col = NULL,
                                      min_slope_for_projection = 1e-4,
                                      max_extrapolation_factor = 10,
                                      ...) {
   .compute_shelf_life_single(
-    predictions              = predictions,
-    plausible_range          = plausible_range,
-    ci_level                 = ci_level,
-    threshold                = threshold,
-    time_col                 = time_col,
+    predictions = predictions,
+    plausible_range = plausible_range,
+    ci_level = ci_level,
+    threshold = threshold,
+    time_col = time_col,
     min_slope_for_projection = min_slope_for_projection,
     max_extrapolation_factor = max_extrapolation_factor
   )
@@ -130,9 +130,9 @@ shelf_life.et_prediction <- function(predictions,
 #' @export
 shelf_life.et_prediction_list <- function(predictions,
                                           plausible_range,
-                                          ci_level                 = 0.90,
-                                          threshold                = 1.0,
-                                          time_col                 = NULL,
+                                          ci_level = 0.90,
+                                          threshold = 1.0,
+                                          time_col = NULL,
                                           min_slope_for_projection = 1e-4,
                                           max_extrapolation_factor = 10,
                                           ...) {
@@ -153,7 +153,7 @@ shelf_life.et_prediction_list <- function(predictions,
   result <- do.call(rbind, Filter(Negate(is.null), parts))
   result <- structure(result, class = c("et_shelf_life", "data.frame"))
   attr(result, "horizon_by_group") <- horizon_by_group
-  attr(result, "threshold")        <- threshold
+  attr(result, "threshold") <- threshold
   result
 }
 
@@ -170,7 +170,7 @@ shelf_life.default <- function(predictions, ...) {
                                         ci_level, threshold, time_col,
                                         min_slope_for_projection,
                                         max_extrapolation_factor = 10) {
-  ci_df       <- predictions$credible_intervals
+  ci_df <- predictions$credible_intervals
   avail_levels <- unique(ci_df$ci_level)
 
   if (!ci_level %in% avail_levels) {
@@ -197,12 +197,12 @@ shelf_life.default <- function(predictions, ...) {
   }
 
   result_df <- data.frame(
-    obs_id          = ci_sub$row_id,
-    time            = time_vals,
-    ci_width        = ci_sub$width,
+    obs_id = ci_sub$row_id,
+    time = time_vals,
+    ci_width = ci_sub$width,
     plausible_range = pr,
-    ratio           = ci_sub$width / pr,
-    informative     = ci_sub$width < threshold * pr,
+    ratio = ci_sub$width / pr,
+    informative = ci_sub$width < threshold * pr,
     stringsAsFactors = FALSE
   )
 
@@ -211,7 +211,7 @@ shelf_life.default <- function(predictions, ...) {
                               max_extrapolation_factor)
 
   result <- structure(result_df, class = c("et_shelf_life", "data.frame"))
-  attr(result, "horizon")   <- horizon
+  attr(result, "horizon") <- horizon
   attr(result, "threshold") <- threshold
   result
 }
@@ -222,8 +222,8 @@ shelf_life.default <- function(predictions, ...) {
 
 .compute_horizon <- function(sl_df, threshold, min_slope,
                              max_extrapolation_factor = 10) {
-  times       <- sl_df$time
-  ratios      <- sl_df$ratio
+  times <- sl_df$time
+  ratios <- sl_df$ratio
   informative <- sl_df$informative
 
   # --- Mode 1: threshold already crossed ---
@@ -231,10 +231,10 @@ shelf_life.default <- function(predictions, ...) {
     first_cross  <- min(times[!informative])
     last_ok      <- if (any(informative)) max(times[informative]) else NA_real_
     return(list(
-      value            = first_cross,
-      type             = "observed",
+      value = first_cross,
+      type = "observed",
       last_informative = last_ok,
-      description      = paste0(
+      description = paste0(
         "Threshold (ratio >= ", threshold, ") first exceeded at ",
         first_cross, "."
       )
@@ -246,8 +246,8 @@ shelf_life.default <- function(predictions, ...) {
 
   if (is.numeric(times) && length(times) >= 3) {
     lm_fit <- suppressWarnings(lm(ratios ~ times))
-    slope  <- coef(lm_fit)[["times"]]
-    b0     <- coef(lm_fit)[["(Intercept)"]]
+    slope <- coef(lm_fit)[["times"]]
+    b0 <- coef(lm_fit)[["(Intercept)"]]
 
     if (!is.na(slope) && slope > min_slope) {
       proj <- (threshold - b0) / slope
@@ -259,10 +259,10 @@ shelf_life.default <- function(predictions, ...) {
 
       if (is.finite(max_extrapolation_factor) && proj > cap_time) {
         return(list(
-          value            = NA_real_,
-          type             = "lower_bound",
+          value = NA_real_,
+          type = "lower_bound",
           last_informative = last_ok,
-          description      = paste0(
+          description = paste0(
             "All ", nrow(sl_df), " forecast periods informative. ",
             "Linear trend (slope = ", round(slope, 5), " per time unit) ",
             "projects threshold crossing at ~", round(proj, 1),
@@ -273,11 +273,11 @@ shelf_life.default <- function(predictions, ...) {
       }
 
       return(list(
-        value            = proj,
-        type             = "projected",
+        value = proj,
+        type = "projected",
         last_informative = last_ok,
-        slope            = slope,
-        description      = paste0(
+        slope = slope,
+        description = paste0(
           "All ", nrow(sl_df), " forecast periods informative. ",
           "Linear trend (slope = ", round(slope, 5), " per time unit) ",
           "projects threshold crossing at ~", round(proj, 1), "."
@@ -288,10 +288,10 @@ shelf_life.default <- function(predictions, ...) {
 
   # --- Mode 3: no upward trend -- lower bound only ---
   list(
-    value            = NA_real_,
-    type             = "lower_bound",
+    value = NA_real_,
+    type = "lower_bound",
     last_informative = last_ok,
-    description      = paste0(
+    description = paste0(
       "All ", nrow(sl_df), " forecast periods informative with no ",
       "upward trend in CI/range ratio. Shelf life > ", last_ok, "."
     )
@@ -305,9 +305,9 @@ shelf_life.default <- function(predictions, ...) {
 .format_horizon <- function(hor) {
   if (is.null(hor)) return(NULL)
   switch(hor$type,
-    observed    = paste0("~", hor$value,
+    observed  = paste0("~", hor$value,
                          " (observed -- threshold first exceeded)"),
-    projected   = paste0("~", round(hor$value, 1),
+    projected = paste0("~", round(hor$value, 1),
                          " (projected -- extrapolated beyond forecast window)"),
     lower_bound = paste0("> ", hor$last_informative,
                          " (lower bound -- all periods informative, no trend)")
