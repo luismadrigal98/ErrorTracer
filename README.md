@@ -8,7 +8,7 @@
 2. **Decompose forecast uncertainty** into three independent sources: parameter uncertainty, environmental/covariate measurement uncertainty, and residual process variance.
 3. **Quantify forecast shelf life** — the time horizon at which a forecast's credible interval becomes wider than the biologically plausible response range, rendering it uninformative. This concept has no equivalent in any existing R package.
 
-The package was developed from an applied population-genomics pipeline (*Mimulus guttatus* at Iron Mountain, OR) that links allele-frequency change to climate predictors, but the API is fully general.
+The package is designed for ecological and genomic time-series forecasting in which a regularized (or plain) regression model is refit as a Bayesian model and predictions must be accompanied by a principled uncertainty budget. The API is fully general — response, predictors, and grouping are formula-driven.
 
 ---
 
@@ -475,7 +475,7 @@ ErrorTracer/
 ├── tests/
 │   └── testthat/
 ├── vignettes/
-│   ├── genomics.Rmd  # Mimulus / Drosophila allele frequency example
+│   ├── genomics.Rmd  # Drosophila allele frequency example
 │   └── ecology.Rmd   # Phenology / species abundance example
 ├── DESCRIPTION
 ├── NAMESPACE
