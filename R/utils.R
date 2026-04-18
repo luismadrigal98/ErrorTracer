@@ -59,11 +59,11 @@ unstandardize <- function(z, mu, s) {
 #' @return A \code{ggplot2} theme object.
 #' @export
 et_theme <- function(base_size = 12) {
-  ggplot2::theme_minimal(base_size = base_size) +
+  ggplot2::theme_bw(base_size = base_size) +
     ggplot2::theme(
-      plot.title    = ggplot2::element_text(face = "bold", size = base_size + 2),
-      strip.text    = ggplot2::element_text(face = "bold"),
-      panel.grid.minor = ggplot2::element_blank(),
+      plot.title = ggplot2::element_text(face = "bold", size = base_size + 2),
+      strip.text = ggplot2::element_text(face = "bold"),
+      panel.grid = ggplot2::element_blank(),
       legend.position  = "bottom"
     )
 }
