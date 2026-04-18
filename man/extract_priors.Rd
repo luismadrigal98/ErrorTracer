@@ -7,7 +7,7 @@
 \alias{extract_priors.cv.glmnet}
 \alias{extract_priors.glmnet}
 \alias{extract_priors.ranger}
-\title{Extract brms prior specification from a regularized model}
+\title{Extract brms prior specification from a regularized or standard regression model}
 \usage{
 extract_priors(
   model,
@@ -110,9 +110,9 @@ An \code{et_prior_spec} list containing:
 \description{
 Converts a fitted model object into a \code{brms} prior specification
 suitable for \code{\link{et_fit}}.  The coefficient estimates (or
-importance weights for \pkg{ranger}) from the regularized fit are used as
+importance weights for \pkg{ranger}) from the regularized or standard fit are used as
 informative prior means, so the Bayesian model starts close to the
-regularized solution while remaining open to data-driven revision.
+regularized or standard solution while remaining open to data-driven revision.
 }
 \details{
 For \code{ranger} models, signed coefficients are not available.  Priors

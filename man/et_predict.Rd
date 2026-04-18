@@ -2,6 +2,8 @@
 % Please edit documentation in R/predict.R
 \name{et_predict}
 \alias{et_predict}
+\alias{et_predict.et_model}
+\alias{et_predict.et_model_list}
 \title{Posterior prediction with uncertainty decomposition}
 \usage{
 et_predict(
@@ -11,6 +13,29 @@ et_predict(
   n_draws = 2000L,
   ci_levels = c(0.5, 0.8, 0.9, 0.95),
   n_perturb = NULL,
+  interval_type = c("predictive", "linpred"),
+  ...
+)
+
+\method{et_predict}{et_model}(
+  model,
+  newdata,
+  env_noise = NULL,
+  n_draws = 2000L,
+  ci_levels = c(0.5, 0.8, 0.9, 0.95),
+  n_perturb = NULL,
+  interval_type = c("predictive", "linpred"),
+  ...
+)
+
+\method{et_predict}{et_model_list}(
+  model,
+  newdata,
+  env_noise = NULL,
+  n_draws = 2000L,
+  ci_levels = c(0.5, 0.8, 0.9, 0.95),
+  n_perturb = NULL,
+  interval_type = c("predictive", "linpred"),
   ...
 )
 }
@@ -49,6 +74,24 @@ capped at the number of draws available in the fit).}
 \item{n_perturb}{Integer.  Number of draws used for the environmental
 perturbation step (default \code{min(500, n_draws)}).  Reducing this
 speeds up computation.}
+
+\item{interval_type}{Character.  Which draws to use when computing credible
+intervals:
+\itemize{
+  \item \code{"predictive"} (default): draws from \code{posterior_predict},
+    which include sigma (residual noise).  Use this when forecasting
+    \strong{individual observations} — e.g. a single population's allele
+    frequency, one site's ozone reading on a specific day.
+  \item \code{"linpred"}: draws from \code{posterior_linpred}, which
+    capture only parameter uncertainty (no sigma).  Use this when
+    forecasting the \strong{mean response} — e.g. the expected ozone
+    across many similar days, or mean Δf across replicate populations.
+    These intervals are always narrower; they will under-cover individual
+    observations unless sigma is negligible.
+}
+The decomposition components and \code{posterior_predict} /
+\code{posterior_linpred} matrices are always computed regardless of this
+setting.}
 
 \item{...}{Passed to methods.}
 }

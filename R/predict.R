@@ -92,6 +92,7 @@ et_predict <- function(model, newdata, env_noise = NULL,
 # Method: et_model (single model)
 # ============================================================
 
+#' @rdname et_predict
 #' @export
 et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   n_draws = 2000L,
@@ -176,6 +177,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
 # Method: et_model_list (grouped models)
 # ============================================================
 
+#' @rdname et_predict
 #' @export
 et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       n_draws = 2000L,
@@ -330,7 +332,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # S3 methods for et_prediction
 # ============================================================
 
-#' @export
+#' @exportS3Method print et_prediction
 print.et_prediction <- function(x, ...) {
   cat("ErrorTracer prediction (et_prediction)\n")
   cat("  Observations  :", ncol(x$posterior_predict), "\n")
@@ -346,7 +348,7 @@ print.et_prediction <- function(x, ...) {
   invisible(x)
 }
 
-#' @export
+#' @exportS3Method print et_prediction_list
 print.et_prediction_list <- function(x, ...) {
   cat("ErrorTracer grouped predictions (et_prediction_list)\n")
   cat("  Grouping :", x$grouping, "\n")

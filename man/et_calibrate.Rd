@@ -29,7 +29,12 @@ A \code{data.frame} with columns:
     \item{nominal}{Same as ci_level.}
     \item{observed_coverage}{Fraction of true values falling inside the CI.}
     \item{n_obs}{Number of observations used.}
-    \item{calibration_error}{Absolute difference: |nominal - observed|.}
+    \item{calibration_error}{Signed difference: observed − nominal.
+      Positive = over-coverage (CIs too wide / conservative).
+      Negative = under-coverage (CIs too narrow / overconfident).}
+    \item{sharpness}{Mean CI width across observations.  Sharpness and
+      calibration are complementary: a model can be calibrated but useless
+      if sharpness is poor (very wide CIs).}
   }
   For grouped predictions, a \code{group} column is prepended.
 }
