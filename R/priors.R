@@ -25,7 +25,17 @@
 #'   \code{multiplier * importance_normalised} (for ranger).  Default 2.0.
 #' @param min_sd Numeric scalar.  Minimum prior SD to avoid degenerate
 #'   (spike) priors on near-zero coefficients.  Default 0.1.
-#' @param intercept_prior_sd Prior SD for the intercept term.  Default 2.5.
+#' @param intercept_prior_sd Optional prior SD for the intercept term.  The
+#'   default \code{NULL} emits \emph{no} explicit intercept prior and lets
+#'   \code{brms} pick its data-aware default
+#'   (\code{student_t(3, median(y), mad(y))}).  If you supply a numeric value,
+#'   the prior becomes \code{normal(0, intercept_prior_sd)} --- this is only
+#'   appropriate when the response has been centred (or nearly so) before
+#'   fitting, since \code{brms}'s \code{class = "Intercept"} refers to the
+#'   intercept at the centre of the predictors, whose posterior mean equals
+#'   \code{E[y]} there.  Supplying a small \code{intercept_prior_sd} for an
+#'   uncentred response will pull the intercept toward zero and cripple the
+#'   fit.
 #' @param sigma_prior_scale Scale parameter for the half-Cauchy prior on the
 #'   residual SD sigma.  Default 1.0.
 #' @param ... Additional arguments passed to methods.
@@ -45,7 +55,7 @@
 #' }
 #' @export
 extract_priors <- function(model, multiplier = 2.0, min_sd = 0.1,
-                           intercept_prior_sd = 2.5, sigma_prior_scale = 1.0,
+                           intercept_prior_sd = NULL, sigma_prior_scale = 1.0,
                            ...) {
   UseMethod("extract_priors")
 }
@@ -57,7 +67,7 @@ extract_priors <- function(model, multiplier = 2.0, min_sd = 0.1,
 #' @rdname extract_priors
 #' @export
 extract_priors.lm <- function(model, multiplier = 2.0, min_sd = 0.1,
-                               intercept_prior_sd = 2.5, sigma_prior_scale = 1.0,
+                               intercept_prior_sd = NULL, sigma_prior_scale = 1.0,
                                ...) {
   coef_summary <- summary(model)$coefficients
   # Drop the intercept row — handled separately
@@ -89,7 +99,7 @@ extract_priors.lm <- function(model, multiplier = 2.0, min_sd = 0.1,
 #' @rdname extract_priors
 #' @export
 extract_priors.glm <- function(model, multiplier = 2.0, min_sd = 0.1,
-                                intercept_prior_sd = 2.5, sigma_prior_scale = 1.0,
+                                intercept_prior_sd = NULL, sigma_prior_scale = 1.0,
                                 ...) {
   coef_summary <- summary(model)$coefficients
   coef_rows <- coef_summary[rownames(coef_summary) != "(Intercept)", , drop = FALSE]
@@ -123,7 +133,7 @@ extract_priors.glm <- function(model, multiplier = 2.0, min_sd = 0.1,
 #'   \code{"lambda.1se"}.
 #' @export
 extract_priors.cv.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
-                                      intercept_prior_sd = 2.5,
+                                      intercept_prior_sd = NULL,
                                       sigma_prior_scale = 1.0,
                                       lambda = "lambda.min", ...) {
   if (!requireNamespace("glmnet", quietly = TRUE)) {
@@ -150,7 +160,7 @@ extract_priors.cv.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
 #'   (smallest regularisation).
 #' @export
 extract_priors.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
-                                   intercept_prior_sd = 2.5,
+                                   intercept_prior_sd = NULL,
                                    sigma_prior_scale = 1.0,
                                    s = 1L, ...) {
   if (!requireNamespace("glmnet", quietly = TRUE)) {
@@ -184,7 +194,7 @@ extract_priors.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
 #' positive permutation importance are included.
 #' @export
 extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
-                                   intercept_prior_sd = 2.5,
+                                   intercept_prior_sd = NULL,
                                    sigma_prior_scale = 1.0, ...) {
   if (!requireNamespace("ranger", quietly = TRUE)) {
     stop("Package 'ranger' is required for extract_priors.ranger().")
@@ -262,8 +272,7 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
                                intercept_prior_sd, sigma_prior_scale) {
   if (length(pred_names) == 0) stop("No predictors to build priors for.")
 
-  prior_list <- vector("list", length(pred_names) + 2L)
-
+  prior_list <- vector("list", length(pred_names))
   for (j in seq_along(pred_names)) {
     prior_list[[j]] <- brms::set_prior(
       paste0("normal(", round(prior_means[j], 6), ", ", round(prior_sds[j], 6), ")"),
@@ -272,17 +281,23 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
     )
   }
 
-  # Intercept
-  prior_list[[length(pred_names) + 1L]] <- brms::set_prior(
-    paste0("normal(0, ", round(intercept_prior_sd, 4), ")"),
-    class = "Intercept"
-  )
+  # Intercept: only emit an explicit prior when the user supplied a scale.
+  # A NULL default lets brms use its data-aware default
+  # (student_t(3, median(y), mad(y))), which is robust across response scales.
+  # A numeric value preserves the previous behaviour -- normal(0, sd) -- which
+  # is only appropriate for a centred response; see extract_priors() docs.
+  if (!is.null(intercept_prior_sd)) {
+    prior_list <- c(prior_list, list(brms::set_prior(
+      paste0("normal(0, ", round(intercept_prior_sd, 4), ")"),
+      class = "Intercept"
+    )))
+  }
 
   # Sigma: half-Cauchy
-  prior_list[[length(pred_names) + 2L]] <- brms::set_prior(
+  prior_list <- c(prior_list, list(brms::set_prior(
     paste0("cauchy(0, ", round(sigma_prior_scale, 4), ")"),
     class = "sigma"
-  )
+  )))
 
   combined_prior <- do.call(c, prior_list)
 

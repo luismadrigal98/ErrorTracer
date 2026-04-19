@@ -13,7 +13,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
-  intercept_prior_sd = 2.5,
+  intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
 )
@@ -22,7 +22,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
-  intercept_prior_sd = 2.5,
+  intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
 )
@@ -31,7 +31,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
-  intercept_prior_sd = 2.5,
+  intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
 )
@@ -40,7 +40,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
-  intercept_prior_sd = 2.5,
+  intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   lambda = "lambda.min",
   ...
@@ -50,7 +50,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
-  intercept_prior_sd = 2.5,
+  intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   s = 1L,
   ...
@@ -60,7 +60,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
-  intercept_prior_sd = 2.5,
+  intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
 )
@@ -81,7 +81,17 @@ extract_priors(
 \item{min_sd}{Numeric scalar.  Minimum prior SD to avoid degenerate
 (spike) priors on near-zero coefficients.  Default 0.1.}
 
-\item{intercept_prior_sd}{Prior SD for the intercept term.  Default 2.5.}
+\item{intercept_prior_sd}{Optional prior SD for the intercept term.  The
+default \code{NULL} emits \emph{no} explicit intercept prior and lets
+\code{brms} pick its data-aware default
+(\code{student_t(3, median(y), mad(y))}).  If you supply a numeric value,
+the prior becomes \code{normal(0, intercept_prior_sd)} --- this is only
+appropriate when the response has been centred (or nearly so) before
+fitting, since \code{brms}'s \code{class = "Intercept"} refers to the
+intercept at the centre of the predictors, whose posterior mean equals
+\code{E[y]} there.  Supplying a small \code{intercept_prior_sd} for an
+uncentred response will pull the intercept toward zero and cripple the
+fit.}
 
 \item{sigma_prior_scale}{Scale parameter for the half-Cauchy prior on the
 residual SD sigma.  Default 1.0.}
