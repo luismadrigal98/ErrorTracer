@@ -131,6 +131,204 @@ et_theme <- function(base_size = 12) {
   result
 }
 
+# Resolve env_cov into a p x p correlation matrix over pred_names.
+# Accepted forms:
+#   NULL          -- identity (independent noise; preserves legacy behavior)
+#   "empirical"   -- correlation of pred_names columns in training_data
+#   "newdata"     -- correlation of pred_names columns in newdata
+#   numeric matrix -- user-supplied correlation or covariance; if the diagonal
+#                     is not ~1, it is rescaled to a correlation matrix.
+#                     rownames/colnames must contain all pred_names.
+#
+# The returned matrix is symmetric PD (eigenvalue-clipped if necessary) and has
+# dimnames = pred_names in the order of pred_names.
+.resolve_env_cor <- function(env_cov, pred_names, training_data, newdata) {
+  p   <- length(pred_names)
+  I_p <- diag(p)
+  dimnames(I_p) <- list(pred_names, pred_names)
+
+  if (is.null(env_cov) || isFALSE(env_cov)) return(I_p)
+
+  if (is.character(env_cov) && length(env_cov) == 1L) {
+    src <- switch(
+      env_cov,
+      empirical = training_data,
+      newdata   = newdata,
+      stop("env_cov must be NULL, 'empirical', 'newdata', or a matrix.")
+    )
+    keep <- intersect(pred_names, colnames(src))
+    if (length(keep) < 2L) {
+      .et_warn("env_cov = '", env_cov, "' needs >= 2 predictors present in ",
+               "the source data; falling back to independent noise.")
+      return(I_p)
+    }
+    X <- as.matrix(src[, keep, drop = FALSE])
+    R <- suppressWarnings(stats::cor(X, use = "pairwise.complete.obs"))
+    R[is.na(R)] <- 0
+    full <- I_p
+    full[keep, keep] <- R
+    return(.nearest_pd(full))
+  }
+
+  if (is.matrix(env_cov) || is.data.frame(env_cov)) {
+    M <- as.matrix(env_cov)
+    if (!all(dim(M) == c(p, p))) {
+      stop("env_cov matrix must be ", p, " x ", p,
+           " (one entry per predictor).")
+    }
+    if (is.null(dimnames(M))) dimnames(M) <- list(pred_names, pred_names)
+    if (!all(pred_names %in% rownames(M)) ||
+        !all(pred_names %in% colnames(M))) {
+      stop("env_cov matrix dimnames must include all predictors: ",
+           paste(pred_names, collapse = ", "))
+    }
+    M <- M[pred_names, pred_names, drop = FALSE]
+    if (max(abs(diag(M) - 1)) > 1e-6) {
+      d <- sqrt(pmax(diag(M), 1e-12))
+      M <- M / tcrossprod(d)
+    }
+    return(.nearest_pd(M))
+  }
+
+  stop("Unrecognized env_cov argument (class: ",
+       paste(class(env_cov), collapse = "/"), ").")
+}
+
+# Resolve env_dist into a named character vector (pred_names -> distribution).
+# Accepted forms:
+#   NULL          -- "gaussian" for every predictor (additive Gaussian noise;
+#                    preserves ErrorTracer's legacy behaviour)
+#   single string -- apply that distribution to every predictor
+#   named list / named character vector -- per-predictor distribution; any
+#                    predictor not named defaults to "gaussian"
+#
+# Supported distributions: "gaussian", "lognormal", "gamma", "beta".
+.resolve_env_dist <- function(env_dist, pred_names) {
+  valid   <- c("gaussian", "lognormal", "gamma", "beta")
+  default <- stats::setNames(rep("gaussian", length(pred_names)), pred_names)
+
+  if (is.null(env_dist)) return(default)
+
+  if (is.character(env_dist) && length(env_dist) == 1L && is.null(names(env_dist))) {
+    if (!env_dist %in% valid) {
+      stop("env_dist = '", env_dist, "' not in ",
+           paste(valid, collapse = ", "))
+    }
+    return(stats::setNames(rep(env_dist, length(pred_names)), pred_names))
+  }
+
+  if (!is.null(names(env_dist))) {
+    unknown <- setdiff(names(env_dist), pred_names)
+    if (length(unknown) > 0) {
+      .et_warn("env_dist contains predictor(s) not in model: ",
+               paste(unknown, collapse = ", "), " -- ignored")
+    }
+    result <- default
+    for (p in intersect(names(env_dist), pred_names)) {
+      d <- as.character(env_dist[[p]])
+      if (!d %in% valid) {
+        stop("env_dist[['", p, "']] = '", d, "' not in ",
+             paste(valid, collapse = ", "))
+      }
+      result[[p]] <- d
+    }
+    return(result)
+  }
+
+  stop("env_dist must be NULL, a single distribution name, ",
+       "or a named list / named character vector.")
+}
+
+# Draw a distribution-aware perturbation of predictor x using latent
+# standard-normal draws Z_std (already correlation-scaled). The returned
+# vector is the perturbed predictor on its original scale, calibrated so
+# that (approximately) E[perturbed] = x and Var[perturbed] = sigma^2, using
+# the following parameterisations:
+#
+#   gaussian  : perturbed = x + Z_std * sigma                      (additive)
+#   lognormal : log(perturbed) ~ N(log(x) - s^2/2, s^2),
+#               s^2 = log(1 + (sigma/x)^2)                     (multiplicative)
+#   gamma     : perturbed ~ Gamma(shape = (x/sigma)^2,
+#                                 rate  =  x /sigma^2)
+#   beta      : perturbed ~ Beta(alpha, beta) with
+#               alpha + beta = x*(1-x)/sigma^2 - 1
+#
+# Correlation across predictors is induced by the latent Z_std (Gaussian
+# copula); the marginal distribution is supplied here. Rows that cannot be
+# parameterised for the requested distribution (e.g. gamma/lognormal with
+# x <= 0; beta with sigma^2 >= x*(1-x)) are returned unperturbed and a
+# warning is emitted at most once per call.
+.perturb_predictor <- function(x, sigma, Z_std, dist) {
+  if (length(sigma) == 1L) sigma <- rep(sigma, length(x))
+  if (all(is.na(sigma) | sigma == 0)) return(x)
+
+  if (dist == "gaussian") {
+    return(x + Z_std * sigma)
+  }
+
+  u <- pmin(pmax(stats::pnorm(Z_std), 1e-10), 1 - 1e-10)
+  out <- x
+
+  if (dist == "lognormal") {
+    safe <- !is.na(sigma) & sigma > 0 & !is.na(x) & x > 0
+    if (any(safe)) {
+      s2 <- log1p((sigma[safe] / x[safe])^2)
+      mu <- log(x[safe]) - s2 / 2
+      out[safe] <- stats::qlnorm(u[safe], meanlog = mu, sdlog = sqrt(s2))
+    }
+    if (any(!safe & sigma > 0 & !is.na(sigma))) {
+      .et_warn("lognormal perturbation skipped for ", sum(!safe),
+               " row(s) with non-positive x.")
+    }
+    return(out)
+  }
+
+  if (dist == "gamma") {
+    safe <- !is.na(sigma) & sigma > 0 & !is.na(x) & x > 0
+    if (any(safe)) {
+      shape <- (x[safe] / sigma[safe])^2
+      rate  <-  x[safe] / sigma[safe]^2
+      out[safe] <- stats::qgamma(u[safe], shape = shape, rate = rate)
+    }
+    if (any(!safe & sigma > 0 & !is.na(sigma))) {
+      .et_warn("gamma perturbation skipped for ", sum(!safe),
+               " row(s) with non-positive x.")
+    }
+    return(out)
+  }
+
+  if (dist == "beta") {
+    safe <- !is.na(sigma) & sigma > 0 & !is.na(x) & x > 0 & x < 1 &
+            sigma^2 < x * (1 - x) - 1e-12
+    if (any(safe)) {
+      mu <- x[safe]
+      nu <- mu * (1 - mu) / sigma[safe]^2 - 1
+      out[safe] <- stats::qbeta(u[safe], shape1 = mu * nu,
+                                         shape2 = (1 - mu) * nu)
+    }
+    n_skip <- sum(!safe & sigma > 0 & !is.na(sigma))
+    if (n_skip > 0) {
+      .et_warn("beta perturbation skipped for ", n_skip,
+               " row(s) outside (0,1) or with sigma^2 >= x*(1-x).")
+    }
+    return(out)
+  }
+
+  stop("Unknown distribution: ", dist)
+}
+
+# Project a (possibly non-PD) symmetric matrix onto the PD cone by clipping
+# eigenvalues. Used to defend against numerical noise and pairwise-complete
+# correlations that are not strictly PSD.
+.nearest_pd <- function(M, eps = 1e-8) {
+  M  <- (M + t(M)) / 2
+  ev <- eigen(M, symmetric = TRUE)
+  lam <- pmax(ev$values, eps)
+  out <- ev$vectors %*% diag(lam, length(lam)) %*% t(ev$vectors)
+  dimnames(out) <- dimnames(M)
+  out
+}
+
 # Extract the names of fixed-effect predictors (excludes Intercept) from a
 # brmsfit object.
 .brms_pred_names <- function(fit) {

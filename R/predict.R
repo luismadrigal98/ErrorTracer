@@ -34,6 +34,76 @@
 #'       \code{list(Tmean = 0.30 + 0.01 * (years - base_year))}.
 #'       Entries not supplied default to zero (no noise for that predictor).
 #'   }
+#' @param env_cov Correlation structure of the environmental noise.  The
+#'   \emph{magnitudes} of the noise come from \code{env_noise}; \code{env_cov}
+#'   supplies the \emph{correlation} between predictors, so that a perturbation
+#'   on row \eqn{i} is drawn from
+#'   \eqn{\mathcal{N}(0,\; D_i R D_i)} with
+#'   \eqn{D_i = \mathrm{diag}(\sigma_{i1}, \ldots, \sigma_{ip})} and
+#'   \eqn{R} = the correlation matrix.  One of:
+#'   \itemize{
+#'     \item \code{NULL} (default): independent noise, \eqn{R = I} --- equivalent
+#'       to ErrorTracer behaviour prior to this feature and the right choice
+#'       when predictor measurement errors are genuinely independent (e.g.\
+#'       separate instruments on unrelated variables).
+#'     \item \code{"empirical"}: compute the correlation of the predictor
+#'       columns in the \strong{training data} (\code{model$data}).  Use this
+#'       when predictor \emph{errors} are expected to inherit the correlation
+#'       structure of the predictors themselves --- e.g.\ temperature and
+#'       humidity that co-vary in the underlying climate system.
+#'     \item \code{"newdata"}: compute the correlation of the predictor columns
+#'       in \code{newdata}.  Useful when the forecast window has a different
+#'       covariance structure than training (e.g.\ scenario runs).
+#'     \item A numeric \eqn{p \times p} matrix with \code{dimnames} matching the
+#'       model's predictors.  Entries with an off-diagonal exceeding 1 are
+#'       rescaled to a correlation matrix.  Use this to supply an independent
+#'       estimate of the \emph{error} correlation structure (e.g.\ from a
+#'       reanalysis product or a sensor covariance report).
+#'   }
+#'   A correlation derived from training data is a working assumption: the
+#'   structure of the \emph{errors} is assumed to mirror the structure of the
+#'   \emph{values}.  When this is implausible, pass a matrix directly.
+#' @param env_dist Distributional form of the per-predictor noise.  The
+#'   \code{env_noise} SDs set the \emph{magnitude} of the perturbation;
+#'   \code{env_dist} sets its \emph{shape}.  For every distribution other than
+#'   \code{"gaussian"}, the noise is calibrated so that (approximately)
+#'   \eqn{E[\tilde x] = x} and \eqn{\mathrm{Var}[\tilde x] = \sigma^2}, using a
+#'   Gaussian copula to honour \code{env_cov}.  One of:
+#'   \itemize{
+#'     \item \code{NULL} (default): \code{"gaussian"} for every predictor ---
+#'       additive Gaussian noise, legacy behaviour.
+#'     \item A single string (\code{"gaussian"}, \code{"lognormal"},
+#'       \code{"gamma"}, \code{"beta"}): applied to all predictors.
+#'     \item A named list / character vector with one entry per predictor to
+#'       override the default, e.g.\
+#'       \code{list(PPT = "gamma", tmax = "gaussian")}.
+#'   }
+#'   Distributions:
+#'   \describe{
+#'     \item{\code{"gaussian"}}{Additive normal noise (\eqn{\tilde x = x + \varepsilon},
+#'       \eqn{\varepsilon \sim N(0, \sigma^2)}).  Appropriate for symmetric
+#'       measurement error on a continuous, potentially negative scale
+#'       (temperature, anomalies).}
+#'     \item{\code{"lognormal"}}{Multiplicative noise: \eqn{\log \tilde x \sim
+#'       N(\log x - s^2/2,\; s^2)} with \eqn{s^2 = \log(1 + (\sigma/x)^2)}.
+#'       Preserves positivity; right-tail skewed.  Natural for strictly
+#'       positive continuous variables whose error scales with magnitude
+#'       (e.g.\ enzyme activity, biomass).  Rows with \eqn{x \le 0} are
+#'       left unperturbed.}
+#'     \item{\code{"gamma"}}{\eqn{\tilde x \sim \mathrm{Gamma}(\mathrm{shape} =
+#'       (x/\sigma)^2,\; \mathrm{rate} = x/\sigma^2)}.  Positive support,
+#'       right-skewed, analytic mean/variance match.  Natural for precipitation,
+#'       rates, and other non-negative continuous variables.  Rows with
+#'       \eqn{x \le 0} are left unperturbed.}
+#'     \item{\code{"beta"}}{\eqn{\tilde x \sim \mathrm{Beta}(\alpha,\beta)} with
+#'       \eqn{\alpha + \beta = x(1-x)/\sigma^2 - 1}.  Support in \eqn{(0,1)};
+#'       appropriate for proportions and probabilities (allele frequencies,
+#'       presence rates).  Rows with \eqn{x \not\in (0,1)} or
+#'       \eqn{\sigma^2 \ge x(1-x)} are left unperturbed.}
+#'   }
+#'   Correlation (\code{env_cov}) is applied to the latent standard-normal
+#'   draws before the marginal quantile transform, so rank correlations are
+#'   preserved across distributions.
 #' @param n_draws Integer.  Number of posterior draws to use (default 2000;
 #'   capped at the number of draws available in the fit).
 #' @param ci_levels Numeric vector.  Credible interval levels to compute
@@ -58,6 +128,18 @@
 #'   The decomposition components and \code{posterior_predict} /
 #'   \code{posterior_linpred} matrices are always computed regardless of this
 #'   setting.
+#' @param include_env_in_ci Logical.  When \code{TRUE} and
+#'   \code{interval_type = "predictive"}, credible intervals are constructed
+#'   from \strong{environmentally inflated} draws
+#'   \eqn{\tilde y = \tilde{\mathrm{lp}} + \varepsilon}, with
+#'   \eqn{\tilde{\mathrm{lp}}} the perturbed linear predictor and
+#'   \eqn{\varepsilon \sim N(0, \sigma^2)} using posterior draws of
+#'   \eqn{\sigma}.  This folds the environmental uncertainty component back
+#'   into the CI, which is typically what you want for sensitivity analyses
+#'   or whenever the reported interval should cover predictor-measurement
+#'   error.  When \code{FALSE} (default, backward compatible), CIs are based
+#'   on \code{posterior_predict} only — parameter + residual, without
+#'   predictor noise.
 #' @param ... Passed to methods.
 #'
 #' @return An \code{et_prediction} object (list) containing:
@@ -76,15 +158,21 @@
 #'     residual_var, total_var}.}
 #'   \item{\code{newdata}}{The input \code{newdata}.}
 #'   \item{\code{model}}{Reference to the \code{et_model} used.}
+#'   \item{\code{env_cov}}{The \eqn{p \times p} correlation matrix actually
+#'     used for perturbation (identity for \code{env_cov = NULL}).}
+#'   \item{\code{env_dist}}{Named character vector mapping each predictor to
+#'     the distribution actually used for its perturbation.}
 #' }
 #'
 #' @seealso \code{\link{decompose_uncertainty}}, \code{\link{shelf_life}},
 #'   \code{\link{et_calibrate}}
 #' @export
-et_predict <- function(model, newdata, env_noise = NULL,
+et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
+                        env_dist = NULL,
                         n_draws = 2000L, ci_levels = c(0.5, 0.8, 0.9, 0.95),
                         n_perturb = NULL,
-                        interval_type = c("predictive", "linpred"), ...) {
+                        interval_type = c("predictive", "linpred"),
+                        include_env_in_ci = FALSE, ...) {
   UseMethod("et_predict")
 }
 
@@ -95,10 +183,13 @@ et_predict <- function(model, newdata, env_noise = NULL,
 #' @rdname et_predict
 #' @export
 et_predict.et_model <- function(model, newdata, env_noise = NULL,
+                                  env_cov = NULL,
+                                  env_dist = NULL,
                                   n_draws = 2000L,
                                   ci_levels = c(0.5, 0.8, 0.9, 0.95),
                                   n_perturb = NULL,
                                   interval_type = c("predictive", "linpred"),
+                                  include_env_in_ci = FALSE,
                                   ...) {
 
   interval_type <- match.arg(interval_type)
@@ -106,8 +197,29 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   pred_names <- .brms_pred_names(fit)
   n_perturb <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
 
-  # Resolve environmental noise SDs
+  # Resolve environmental noise SDs, correlation structure, and per-predictor
+  # perturbation distribution.
   noise_sds <- .resolve_env_noise(env_noise, pred_names, newdata)
+  cor_mat   <- .resolve_env_cor(env_cov, pred_names,
+                                training_data = model$data,
+                                newdata       = newdata)
+  dist_spec <- .resolve_env_dist(env_dist, pred_names)
+
+  # If the model was fit with errors-in-variables (me() terms), the fit's
+  # beta posteriors already absorb predictor measurement noise; perturbing
+  # those predictors again would double-count. Warn, so the user can
+  # null-out env_noise for EIV-modelled predictors.
+  eiv_preds <- names(model$eiv_spec %||% list())
+  if (length(eiv_preds) && !is.null(env_noise)) {
+    overlap <- intersect(eiv_preds, names(noise_sds))
+    overlap <- overlap[vapply(overlap, function(p) any(noise_sds[[p]] != 0),
+                              logical(1))]
+    if (length(overlap)) {
+      .et_warn("env_noise is non-zero for predictor(s) also modelled ",
+               "under eiv (", paste(overlap, collapse = ", "),
+               "); env_var may double-count predictor uncertainty.")
+    }
+  }
 
   # --- 1. Posterior predictive (full uncertainty) ---
   pp <- brms::posterior_predict(fit, newdata = newdata, ndraws = n_draws)
@@ -136,7 +248,9 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
       draws_mat  = draws_mat[seq_len(n_perturb), , drop = FALSE],
       newdata    = newdata,
       pred_names = pred_names,
-      noise_sds  = noise_sds   # named list of per-obs vectors
+      noise_sds  = noise_sds,   # named list of per-obs vectors
+      cor_mat    = cor_mat,     # p x p correlation over pred_names
+      dist_spec  = dist_spec    # named character: predictor -> distribution
     )
   }
 
@@ -144,7 +258,18 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # Route to posterior_predict (includes sigma) or posterior_linpred (no sigma)
   # depending on interval_type. The underlying matrices are always stored for
   # decomposition regardless.
-  ci_draws <- if (interval_type == "predictive") pp else lp
+  # When include_env_in_ci = TRUE and interval_type is predictive, rebuild
+  # predictive draws as lp_perturbed + sigma * N(0,1) so predictor noise is
+  # folded back into the credible interval.
+  ci_draws <- if (interval_type == "predictive") {
+    if (isTRUE(include_env_in_ci) && !all_zero_noise) {
+      .inflate_env_predictive(lp_perturbed, sigma_draws)
+    } else {
+      pp
+    }
+  } else {
+    lp
+  }
   ci_df <- .compute_ci(ci_draws, ci_levels)
 
   # --- 6. Decomposition ---
@@ -166,8 +291,11 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
       newdata            = newdata,
       model              = model,
       env_noise          = env_noise,
+      env_cov            = cor_mat,
+      env_dist           = dist_spec,
       n_draws            = n_draws,
-      interval_type      = interval_type
+      interval_type      = interval_type,
+      include_env_in_ci  = isTRUE(include_env_in_ci)
     ),
     class = "et_prediction"
   )
@@ -180,10 +308,13 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
 #' @rdname et_predict
 #' @export
 et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
+                                      env_cov = NULL,
+                                      env_dist = NULL,
                                       n_draws = 2000L,
                                       ci_levels = c(0.5, 0.8, 0.9, 0.95),
                                       n_perturb = NULL,
                                       interval_type = c("predictive", "linpred"),
+                                      include_env_in_ci = FALSE,
                                       ...) {
   interval_type <- match.arg(interval_type)
 
@@ -210,13 +341,16 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 
     preds[[g]] <- tryCatch(
       et_predict.et_model(
-        model         = m,
-        newdata       = sub_nd,
-        env_noise     = env_noise,
-        n_draws       = n_draws,
-        ci_levels     = ci_levels,
-        n_perturb     = n_perturb,
-        interval_type = interval_type,
+        model             = m,
+        newdata           = sub_nd,
+        env_noise         = env_noise,
+        env_cov           = env_cov,
+        env_dist          = env_dist,
+        n_draws           = n_draws,
+        ci_levels         = ci_levels,
+        n_perturb         = n_perturb,
+        interval_type     = interval_type,
+        include_env_in_ci = include_env_in_ci,
         ...
       ),
       error = function(e) {
@@ -246,7 +380,16 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # pred_names: character vector
 # noise_sds : named list; each element is a numeric vector of length n_obs
 #             giving the per-observation noise SD for that predictor.
-.compute_lp_perturbed <- function(draws_mat, newdata, pred_names, noise_sds) {
+# cor_mat   : p x p correlation matrix over pred_names (identity = independent).
+#             Used to draw correlated standard-normal latents; marginal
+#             distributions are then applied per predictor via dist_spec.
+# dist_spec : named character vector (predictor -> distribution). Controls
+#             the marginal perturbation form (gaussian / lognormal / gamma
+#             / beta) via .perturb_predictor(). The correlation in cor_mat is
+#             applied on the Gaussian copula so rank correlations are
+#             preserved across distributions.
+.compute_lp_perturbed <- function(draws_mat, newdata, pred_names, noise_sds,
+                                   cor_mat = NULL, dist_spec = NULL) {
   n_perturb <- nrow(draws_mat)
   n_obs     <- nrow(newdata)
   lp_mat    <- matrix(NA_real_, n_perturb, n_obs)
@@ -267,21 +410,82 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     rep(0, n_perturb)
   }
 
-  for (i in seq_len(n_perturb)) {
-    nd_p <- newdata
-    for (p in pred_names) {
-      sd_vec <- noise_sds[[p]]   # per-obs vector, length n_obs
-      if (!is.null(sd_vec) && any(sd_vec > 0, na.rm = TRUE)) {
-        # rnorm() accepts a vector 'sd' -- each observation gets its own draw
-        nd_p[[p]] <- nd_p[[p]] + stats::rnorm(n_obs, mean = 0, sd = sd_vec)
-      }
+  # Cholesky of the correlation sub-matrix restricted to available predictors.
+  # L is upper triangular with t(L) %*% L == R, so rows of Z %*% L with
+  # Z ~ N(0, I) have covariance R.
+  L <- NULL
+  if (!is.null(cor_mat)) {
+    R_sub <- cor_mat[avail_preds, avail_preds, drop = FALSE]
+    if (!isTRUE(all.equal(R_sub, diag(length(avail_preds)),
+                          check.attributes = FALSE))) {
+      L <- tryCatch(chol(R_sub),
+                    error = function(e) {
+                      .et_warn("Cholesky of env_cov failed (", e$message,
+                               "); falling back to independent noise.")
+                      NULL
+                    })
     }
-    xmat        <- as.matrix(nd_p[, avail_preds, drop = FALSE])
+  }
+
+  # Stack per-predictor per-obs SDs into an n_obs x p matrix for elementwise
+  # scaling of the standardized draws.
+  sd_mat <- do.call(cbind, lapply(avail_preds, function(p) {
+    v <- noise_sds[[p]]
+    if (is.null(v)) rep(0, n_obs) else v
+  }))
+  colnames(sd_mat) <- avail_preds
+
+  # Fill in any missing distribution entries with "gaussian".
+  if (is.null(dist_spec)) {
+    dist_spec <- stats::setNames(rep("gaussian", length(avail_preds)),
+                                 avail_preds)
+  } else {
+    missing_preds <- setdiff(avail_preds, names(dist_spec))
+    if (length(missing_preds)) {
+      dist_spec[missing_preds] <- "gaussian"
+    }
+  }
+
+  # Original predictor values as a matrix for distributional perturbation.
+  x_mat <- as.matrix(newdata[, avail_preds, drop = FALSE])
+
+  for (i in seq_len(n_perturb)) {
+    Z <- matrix(stats::rnorm(n_obs * length(avail_preds)),
+                n_obs, length(avail_preds))
+    if (!is.null(L)) Z <- Z %*% L
+
+    xmat_p <- x_mat
+    for (k in seq_along(avail_preds)) {
+      p <- avail_preds[k]
+      xmat_p[, k] <- .perturb_predictor(
+        x     = x_mat[, k],
+        sigma = sd_mat[, k],
+        Z_std = Z[, k],
+        dist  = dist_spec[[p]]
+      )
+    }
+
     betas       <- draws_mat[i, avail_betas]
-    lp_mat[i, ] <- int_vals[i] + xmat %*% betas
+    lp_mat[i, ] <- int_vals[i] + xmat_p %*% betas
   }
 
   lp_mat
+}
+
+# Fold environmental noise into the predictive draws by adding fresh
+# residual noise on top of the perturbed linear predictor. The result is a
+# matrix with the same shape as lp_perturbed whose column variance equals
+# approximately var(lp_perturbed) + mean(sigma_draws^2), so CIs built from
+# it cover parameter + env + residual uncertainty.
+.inflate_env_predictive <- function(lp_perturbed, sigma_draws) {
+  n_p  <- nrow(lp_perturbed)
+  n_o  <- ncol(lp_perturbed)
+  s    <- sigma_draws[seq_len(n_p)]
+  s[is.na(s)] <- 0
+  # rnorm with vector sd is recycled element-wise; wrapping in matrix(, nrow=n_p)
+  # then aligns row i with sigma i since R fills column-major.
+  eps  <- matrix(stats::rnorm(n_p * n_o, sd = rep(s, n_o)), nrow = n_p)
+  lp_perturbed + eps
 }
 
 # Build credible interval data.frame from posterior predictive matrix.

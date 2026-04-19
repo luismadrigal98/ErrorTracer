@@ -16,6 +16,7 @@ et_fit(
   adapt_delta = 0.95,
   max_treedepth = 12L,
   grouping = NULL,
+  eiv = NULL,
   silent = 2L,
   ...
 )
@@ -51,6 +52,20 @@ et_fit(
 \item{grouping}{Character.  Name of a column in \code{data} to use for
 grouping.  If non-\code{NULL}, one model is fitted per unique group
 value and an \code{et_model_list} is returned.}
+
+\item{eiv}{Optional errors-in-variables specification.  A named list /
+vector mapping predictor names to either a scalar SD or a vector of
+per-row SDs (length \code{nrow(data)}).  For each entry, the formula
+term for that predictor is rewritten as \code{brms::me(pred, se_pred)}
+(an auxiliary \code{se_<pred>} column is appended to \code{data}), so
+the posterior reflects measurement error in the predictor as well as
+coefficient uncertainty.  The beta posteriors widen accordingly, which
+partially absorbs what ErrorTracer's downstream \code{env_var}
+component would otherwise report.  When \code{eiv} is supplied together
+with an \code{et_prior_spec} from \code{\link{extract_priors}}, the
+informed priors are \emph{dropped} because they target \code{class = "b"}
+terms and \code{me()} terms live under \code{class = "bsp"}; brms
+defaults are used instead (and a warning is logged).}
 
 \item{silent}{Integer passed to \code{brms::brm()} (default 2, no Stan
 output).}

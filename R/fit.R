@@ -32,6 +32,19 @@
 #' @param grouping Character.  Name of a column in \code{data} to use for
 #'   grouping.  If non-\code{NULL}, one model is fitted per unique group
 #'   value and an \code{et_model_list} is returned.
+#' @param eiv Optional errors-in-variables specification.  A named list /
+#'   vector mapping predictor names to either a scalar SD or a vector of
+#'   per-row SDs (length \code{nrow(data)}).  For each entry, the formula
+#'   term for that predictor is rewritten as \code{brms::me(pred, se_pred)}
+#'   (an auxiliary \code{se_<pred>} column is appended to \code{data}), so
+#'   the posterior reflects measurement error in the predictor as well as
+#'   coefficient uncertainty.  The beta posteriors widen accordingly, which
+#'   partially absorbs what ErrorTracer's downstream \code{env_var}
+#'   component would otherwise report.  When \code{eiv} is supplied together
+#'   with an \code{et_prior_spec} from \code{\link{extract_priors}}, the
+#'   informed priors are \emph{dropped} because they target \code{class = "b"}
+#'   terms and \code{me()} terms live under \code{class = "bsp"}; brms
+#'   defaults are used instead (and a warning is logged).
 #' @param silent Integer passed to \code{brms::brm()} (default 2, no Stan
 #'   output).
 #' @param ... Additional arguments passed to \code{brms::brm()}.
@@ -54,24 +67,102 @@ et_fit <- function(formula,
                    adapt_delta = 0.95,
                    max_treedepth = 12L,
                    grouping = NULL,
+                   eiv = NULL,
                    silent = 2L,
                    ...) {
 
+  # Rewrite formula + augment data for measurement-error predictors if eiv
+  # was supplied. Strips any et_prior_spec priors because their (class="b",
+  # coef=pred_name) entries don't apply to me() (class="bsp") terms.
+  eiv_spec <- NULL
+  if (!is.null(eiv)) {
+    rewrite  <- .apply_eiv(formula, data, eiv)
+    formula  <- rewrite$formula
+    data     <- rewrite$data
+    eiv_spec <- rewrite$eiv_spec
+    if (inherits(priors, "et_prior_spec")) {
+      .et_warn("eiv specified; dropping informed priors (they target ",
+               "class='b' terms but me() coefficients are class='bsp'). ",
+               "Using brms defaults.")
+      priors <- NULL
+    }
+  }
+
   if (!is.null(grouping)) {
-    return(.et_fit_grouped(
+    result <- .et_fit_grouped(
       formula = formula, data = data, priors = priors,
       chains = chains, iter = iter, warmup = warmup, cores = cores,
       seed = seed, adapt_delta = adapt_delta, max_treedepth = max_treedepth,
       grouping = grouping, silent = silent, ...
-    ))
+    )
+    if (!is.null(eiv_spec)) result$eiv_spec <- eiv_spec
+    return(result)
   }
 
-  .et_fit_single(
+  result <- .et_fit_single(
     formula = formula, data = data, priors = priors,
     chains = chains, iter = iter, warmup = warmup, cores = cores,
     seed = seed, adapt_delta = adapt_delta, max_treedepth = max_treedepth,
     silent = silent, ...
   )
+  if (!is.null(eiv_spec)) result$eiv_spec <- eiv_spec
+  result
+}
+
+# ============================================================
+# Internal: rewrite formula and augment data for errors-in-variables
+# ============================================================
+
+# Given (formula, data, eiv), return a list(formula = new, data = new).
+# For each named predictor in eiv:
+#   * append a column se_<pred> to data (scalar recycled or vector of length
+#     nrow(data)),
+#   * substitute pred -> me(pred, se_<pred>) in the formula RHS.
+# The substitution preserves everything else in the formula (intercept,
+# interactions, factor contrasts). Matches only on whole-token predictor
+# names to avoid partial-string collisions.
+.apply_eiv <- function(formula, data, eiv) {
+  if (!is.list(eiv) && !is.numeric(eiv)) {
+    stop("eiv must be a named list or named numeric vector.")
+  }
+  if (is.null(names(eiv)) || any(!nzchar(names(eiv)))) {
+    stop("eiv must have names matching predictor columns.")
+  }
+  eiv <- as.list(eiv)
+
+  term_labels <- attr(stats::terms(formula, data = data), "term.labels")
+  missing_preds <- setdiff(names(eiv), colnames(data))
+  if (length(missing_preds)) {
+    stop("eiv references column(s) not in data: ",
+         paste(missing_preds, collapse = ", "))
+  }
+
+  n_obs <- nrow(data)
+  for (p in names(eiv)) {
+    v <- as.numeric(eiv[[p]])
+    if (length(v) == 1L) v <- rep(v, n_obs)
+    if (length(v) != n_obs) {
+      stop("eiv[['", p, "']] has length ", length(v),
+           " but data has ", n_obs, " row(s).")
+    }
+    if (any(is.na(v) | v < 0)) {
+      stop("eiv[['", p, "']] must be non-negative and finite.")
+    }
+    data[[paste0("se_", p)]] <- v
+  }
+
+  rhs <- deparse(formula[[3L]], width.cutoff = 500L)
+  rhs <- paste(rhs, collapse = " ")
+  for (p in names(eiv)) {
+    pattern <- paste0("(?<![A-Za-z0-9_.])", p, "(?![A-Za-z0-9_.])")
+    replacement <- paste0("me(", p, ", se_", p, ")")
+    rhs <- gsub(pattern, replacement, rhs, perl = TRUE)
+  }
+  lhs <- deparse(formula[[2L]], width.cutoff = 500L)
+  new_formula <- stats::as.formula(paste(lhs, "~", rhs),
+                                   env = environment(formula))
+
+  list(formula = new_formula, data = data, eiv_spec = eiv)
 }
 
 # ============================================================

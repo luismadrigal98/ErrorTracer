@@ -10,10 +10,13 @@ et_predict(
   model,
   newdata,
   env_noise = NULL,
+  env_cov = NULL,
+  env_dist = NULL,
   n_draws = 2000L,
   ci_levels = c(0.5, 0.8, 0.9, 0.95),
   n_perturb = NULL,
   interval_type = c("predictive", "linpred"),
+  include_env_in_ci = FALSE,
   ...
 )
 
@@ -21,10 +24,13 @@ et_predict(
   model,
   newdata,
   env_noise = NULL,
+  env_cov = NULL,
+  env_dist = NULL,
   n_draws = 2000L,
   ci_levels = c(0.5, 0.8, 0.9, 0.95),
   n_perturb = NULL,
   interval_type = c("predictive", "linpred"),
+  include_env_in_ci = FALSE,
   ...
 )
 
@@ -32,10 +38,13 @@ et_predict(
   model,
   newdata,
   env_noise = NULL,
+  env_cov = NULL,
+  env_dist = NULL,
   n_draws = 2000L,
   ci_levels = c(0.5, 0.8, 0.9, 0.95),
   n_perturb = NULL,
   interval_type = c("predictive", "linpred"),
+  include_env_in_ci = FALSE,
   ...
 )
 }
@@ -65,6 +74,78 @@ Can be:
     Entries not supplied default to zero (no noise for that predictor).
 }}
 
+\item{env_cov}{Correlation structure of the environmental noise.  The
+\emph{magnitudes} of the noise come from \code{env_noise}; \code{env_cov}
+supplies the \emph{correlation} between predictors, so that a perturbation
+on row \eqn{i} is drawn from
+\eqn{\mathcal{N}(0,\; D_i R D_i)} with
+\eqn{D_i = \mathrm{diag}(\sigma_{i1}, \ldots, \sigma_{ip})} and
+\eqn{R} = the correlation matrix.  One of:
+\itemize{
+  \item \code{NULL} (default): independent noise, \eqn{R = I} --- equivalent
+    to ErrorTracer behaviour prior to this feature and the right choice
+    when predictor measurement errors are genuinely independent (e.g.\
+    separate instruments on unrelated variables).
+  \item \code{"empirical"}: compute the correlation of the predictor
+    columns in the \strong{training data} (\code{model$data}).  Use this
+    when predictor \emph{errors} are expected to inherit the correlation
+    structure of the predictors themselves --- e.g.\ temperature and
+    humidity that co-vary in the underlying climate system.
+  \item \code{"newdata"}: compute the correlation of the predictor columns
+    in \code{newdata}.  Useful when the forecast window has a different
+    covariance structure than training (e.g.\ scenario runs).
+  \item A numeric \eqn{p \times p} matrix with \code{dimnames} matching the
+    model's predictors.  Entries with an off-diagonal exceeding 1 are
+    rescaled to a correlation matrix.  Use this to supply an independent
+    estimate of the \emph{error} correlation structure (e.g.\ from a
+    reanalysis product or a sensor covariance report).
+}
+A correlation derived from training data is a working assumption: the
+structure of the \emph{errors} is assumed to mirror the structure of the
+\emph{values}.  When this is implausible, pass a matrix directly.}
+
+\item{env_dist}{Distributional form of the per-predictor noise.  The
+\code{env_noise} SDs set the \emph{magnitude} of the perturbation;
+\code{env_dist} sets its \emph{shape}.  For every distribution other than
+\code{"gaussian"}, the noise is calibrated so that (approximately)
+\eqn{E[\tilde x] = x} and \eqn{\mathrm{Var}[\tilde x] = \sigma^2}, using a
+Gaussian copula to honour \code{env_cov}.  One of:
+\itemize{
+  \item \code{NULL} (default): \code{"gaussian"} for every predictor ---
+    additive Gaussian noise, legacy behaviour.
+  \item A single string (\code{"gaussian"}, \code{"lognormal"},
+    \code{"gamma"}, \code{"beta"}): applied to all predictors.
+  \item A named list / character vector with one entry per predictor to
+    override the default, e.g.\
+    \code{list(PPT = "gamma", tmax = "gaussian")}.
+}
+Distributions:
+\describe{
+  \item{\code{"gaussian"}}{Additive normal noise (\eqn{\tilde x = x + \varepsilon},
+    \eqn{\varepsilon \sim N(0, \sigma^2)}).  Appropriate for symmetric
+    measurement error on a continuous, potentially negative scale
+    (temperature, anomalies).}
+  \item{\code{"lognormal"}}{Multiplicative noise: \eqn{\log \tilde x \sim
+    N(\log x - s^2/2,\; s^2)} with \eqn{s^2 = \log(1 + (\sigma/x)^2)}.
+    Preserves positivity; right-tail skewed.  Natural for strictly
+    positive continuous variables whose error scales with magnitude
+    (e.g.\ enzyme activity, biomass).  Rows with \eqn{x \le 0} are
+    left unperturbed.}
+  \item{\code{"gamma"}}{\eqn{\tilde x \sim \mathrm{Gamma}(\mathrm{shape} =
+    (x/\sigma)^2,\; \mathrm{rate} = x/\sigma^2)}.  Positive support,
+    right-skewed, analytic mean/variance match.  Natural for precipitation,
+    rates, and other non-negative continuous variables.  Rows with
+    \eqn{x \le 0} are left unperturbed.}
+  \item{\code{"beta"}}{\eqn{\tilde x \sim \mathrm{Beta}(\alpha,\beta)} with
+    \eqn{\alpha + \beta = x(1-x)/\sigma^2 - 1}.  Support in \eqn{(0,1)};
+    appropriate for proportions and probabilities (allele frequencies,
+    presence rates).  Rows with \eqn{x \not\in (0,1)} or
+    \eqn{\sigma^2 \ge x(1-x)} are left unperturbed.}
+}
+Correlation (\code{env_cov}) is applied to the latent standard-normal
+draws before the marginal quantile transform, so rank correlations are
+preserved across distributions.}
+
 \item{n_draws}{Integer.  Number of posterior draws to use (default 2000;
 capped at the number of draws available in the fit).}
 
@@ -93,6 +174,19 @@ The decomposition components and \code{posterior_predict} /
 \code{posterior_linpred} matrices are always computed regardless of this
 setting.}
 
+\item{include_env_in_ci}{Logical.  When \code{TRUE} and
+\code{interval_type = "predictive"}, credible intervals are constructed
+from \strong{environmentally inflated} draws
+\eqn{\tilde y = \tilde{\mathrm{lp}} + \varepsilon}, with
+\eqn{\tilde{\mathrm{lp}}} the perturbed linear predictor and
+\eqn{\varepsilon \sim N(0, \sigma^2)} using posterior draws of
+\eqn{\sigma}.  This folds the environmental uncertainty component back
+into the CI, which is typically what you want for sensitivity analyses
+or whenever the reported interval should cover predictor-measurement
+error.  When \code{FALSE} (default, backward compatible), CIs are based
+on \code{posterior_predict} only — parameter + residual, without
+predictor noise.}
+
 \item{...}{Passed to methods.}
 }
 \value{
@@ -112,6 +206,10 @@ An \code{et_prediction} object (list) containing:
     residual_var, total_var}.}
   \item{\code{newdata}}{The input \code{newdata}.}
   \item{\code{model}}{Reference to the \code{et_model} used.}
+  \item{\code{env_cov}}{The \eqn{p \times p} correlation matrix actually
+    used for perturbation (identity for \code{env_cov = NULL}).}
+  \item{\code{env_dist}}{Named character vector mapping each predictor to
+    the distribution actually used for its perturbation.}
 }
 }
 \description{

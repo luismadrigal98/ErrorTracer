@@ -400,6 +400,92 @@ et_plot_coefficients.et_model_list <- function(model) {
 }
 
 # ============================================================
+# et_plot_sensitivity(): noise fraction vs horizon / env_share
+# ============================================================
+
+#' Plot a sensitivity profile
+#'
+#' Visualises the output of \code{\link{et_sensitivity_profile}}: for each
+#' noise grid point, shows how the \strong{environmental share} of total
+#' variance and the \strong{forecast horizon} respond.  Observed horizons
+#' are drawn as solid points; projected horizons are hollow points;
+#' lower-bound rows are drawn as upward arrows at the last informative time.
+#'
+#' The x-axis is the noise fraction (when the grid was built from
+#' \code{fraction_grid}) or the grid step label otherwise.  When both a
+#' numeric fraction and a descriptive label exist, the fraction is preferred
+#' for continuous x-positioning.
+#'
+#' @param sens An \code{et_sensitivity} object from
+#'   \code{\link{et_sensitivity_profile}}.
+#' @param show \code{"horizon"} (default) shows the shelf-life horizon;
+#'   \code{"env_share"} shows \code{env_var / total_var}; \code{"ratio"}
+#'   shows the mean CI width / plausible range.
+#' @return A \code{ggplot2} object.
+#' @seealso \code{\link{et_sensitivity_profile}}
+#' @export
+et_plot_sensitivity <- function(sens, show = c("horizon", "env_share", "ratio")) {
+  if (!inherits(sens, "et_sensitivity")) {
+    stop("et_plot_sensitivity() expects an et_sensitivity object.")
+  }
+  show <- match.arg(show)
+
+  df <- as.data.frame(sens)
+  x_is_numeric <- !all(is.na(df$fraction))
+  df$x <- if (x_is_numeric) df$fraction else seq_len(nrow(df))
+  x_lab <- if (x_is_numeric) "Noise fraction of predictor SD" else "Grid step"
+
+  if (show == "horizon") {
+    df$y <- df$horizon
+    df$point_shape <- factor(
+      ifelse(df$horizon_type == "observed", "observed",
+      ifelse(df$horizon_type == "projected", "projected", "lower bound")),
+      levels = c("observed", "projected", "lower bound")
+    )
+    p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[["x"]], y = .data[["y"]])) +
+      ggplot2::geom_line(na.rm = TRUE, colour = "#2166AC") +
+      ggplot2::geom_point(ggplot2::aes(shape = .data[["point_shape"]]),
+                          size = 3, na.rm = TRUE) +
+      ggplot2::scale_shape_manual(
+        values = c("observed" = 16, "projected" = 21, "lower bound" = 2),
+        drop = FALSE, name = "Horizon type"
+      ) +
+      ggplot2::labs(x = x_lab, y = "Forecast horizon",
+                    title = "Shelf life vs. assumed measurement noise")
+  } else if (show == "env_share") {
+    p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[["x"]],
+                                          y = .data[["env_share"]])) +
+      ggplot2::geom_line(colour = "#4DAC26") +
+      ggplot2::geom_point(colour = "#4DAC26", size = 3) +
+      ggplot2::scale_y_continuous(labels = scales_percent_safe,
+                                  limits = c(0, NA)) +
+      ggplot2::labs(x = x_lab,
+                    y = "Environmental share of total variance",
+                    title = "How much of the forecast variance is environmental?")
+  } else {
+    thr <- attr(sens, "threshold")
+    p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[["x"]],
+                                          y = .data[["ratio_mean"]])) +
+      ggplot2::geom_line(colour = "#B2182B") +
+      ggplot2::geom_point(colour = "#B2182B", size = 3) +
+      ggplot2::geom_hline(yintercept = if (is.null(thr)) 1 else thr,
+                          linetype = "dashed") +
+      ggplot2::labs(x = x_lab,
+                    y = "Mean CI width / plausible range",
+                    title = "Forecast informativeness vs. noise")
+  }
+
+  p + et_theme()
+}
+
+# Permissive wrapper for scales::percent — fall back to identity if the
+# scales package isn't installed so the plot still renders.
+scales_percent_safe <- function(x) {
+  if (requireNamespace("scales", quietly = TRUE)) scales::percent(x)
+  else formatC(100 * x, format = "f", digits = 0, flag = "#")
+}
+
+# ============================================================
 # Internal helpers
 # ============================================================
 
