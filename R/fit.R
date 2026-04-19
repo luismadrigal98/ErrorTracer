@@ -80,6 +80,11 @@ et_fit <- function(formula,
     formula  <- rewrite$formula
     data     <- rewrite$data
     eiv_spec <- rewrite$eiv_spec
+    # brms parses me() via eval() against the search path, so brms must be
+    # attached (not just imported) for me() to resolve. Attach it once.
+    if (!"package:brms" %in% search()) {
+      suppressPackageStartupMessages(attachNamespace("brms"))
+    }
     if (inherits(priors, "et_prior_spec")) {
       .et_warn("eiv specified; dropping informed priors (they target ",
                "class='b' terms but me() coefficients are class='bsp'). ",
@@ -159,8 +164,13 @@ et_fit <- function(formula,
     rhs <- gsub(pattern, replacement, rhs, perl = TRUE)
   }
   lhs <- deparse(formula[[2L]], width.cutoff = 500L)
-  new_formula <- stats::as.formula(paste(lhs, "~", rhs),
-                                   env = environment(formula))
+  # brms evaluates `me()` during formula parsing via eval() on the formula's
+  # own environment, so we bind `me` (and `mi`, for completeness) directly
+  # in that environment rather than relying on brms being attached.
+  env <- new.env(parent = environment(formula) %||% parent.frame())
+  env$me <- brms::me
+  if (exists("mi", envir = asNamespace("brms"))) env$mi <- brms::mi
+  new_formula <- stats::as.formula(paste(lhs, "~", rhs), env = env)
 
   list(formula = new_formula, data = data, eiv_spec = eiv)
 }

@@ -197,6 +197,25 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   pred_names <- .brms_pred_names(fit)
   n_perturb <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
 
+  # For EIV-fit models, posterior_predict() on newdata requires each se_<pred>
+  # column present. Copy them over from the training data (recycled to the
+  # length of newdata) when the user hasn't supplied them.
+  if (!is.null(model$eiv_spec)) {
+    for (p in names(model$eiv_spec)) {
+      se_col <- paste0("se_", p)
+      if (!se_col %in% colnames(newdata)) {
+        v <- as.numeric(model$eiv_spec[[p]])
+        if (length(v) == 1L) v <- rep(v, nrow(newdata))
+        if (length(v) != nrow(newdata)) {
+          stop("eiv_spec[['", p, "']] has length ", length(v),
+               " but newdata has ", nrow(newdata), " row(s). ",
+               "Supply a se_", p, " column in newdata explicitly.")
+        }
+        newdata[[se_col]] <- v
+      }
+    }
+  }
+
   # Resolve environmental noise SDs, correlation structure, and per-predictor
   # perturbation distribution.
   noise_sds <- .resolve_env_noise(env_noise, pred_names, newdata)
