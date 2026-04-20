@@ -180,8 +180,7 @@ et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
 # Method: et_model (single model)
 # ============================================================
 
-#' @rdname et_predict
-#' @export
+#' @exportS3Method et_predict et_model
 et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   env_cov = NULL,
                                   env_dist = NULL,
@@ -324,8 +323,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
 # Method: et_model_list (grouped models)
 # ============================================================
 
-#' @rdname et_predict
-#' @export
+#' @exportS3Method et_predict et_model_list
 et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       env_cov = NULL,
                                       env_dist = NULL,

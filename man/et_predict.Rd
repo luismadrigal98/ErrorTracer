@@ -2,39 +2,9 @@
 % Please edit documentation in R/predict.R
 \name{et_predict}
 \alias{et_predict}
-\alias{et_predict.et_model}
-\alias{et_predict.et_model_list}
 \title{Posterior prediction with uncertainty decomposition}
 \usage{
 et_predict(
-  model,
-  newdata,
-  env_noise = NULL,
-  env_cov = NULL,
-  env_dist = NULL,
-  n_draws = 2000L,
-  ci_levels = c(0.5, 0.8, 0.9, 0.95),
-  n_perturb = NULL,
-  interval_type = c("predictive", "linpred"),
-  include_env_in_ci = FALSE,
-  ...
-)
-
-\method{et_predict}{et_model}(
-  model,
-  newdata,
-  env_noise = NULL,
-  env_cov = NULL,
-  env_dist = NULL,
-  n_draws = 2000L,
-  ci_levels = c(0.5, 0.8, 0.9, 0.95),
-  n_perturb = NULL,
-  interval_type = c("predictive", "linpred"),
-  include_env_in_ci = FALSE,
-  ...
-)
-
-\method{et_predict}{et_model_list}(
   model,
   newdata,
   env_noise = NULL,

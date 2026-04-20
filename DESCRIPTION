@@ -27,6 +27,7 @@ Imports:
 Suggests:
     loo (>= 2.6.0),
     bayesplot (>= 1.10.0),
+    scales (>= 1.3.0),
     tidyr (>= 1.3.0),
     glmnet (>= 4.1.0),
     ranger (>= 0.15.0),
