@@ -8,7 +8,7 @@ Authors@R: c(
     person(given = "John", family = "Kelly", role = "aut", email = "jkk@ku.edu")
   )
 Description: Provides a full pipeline from regularized or standard regression models
-    (elastic net, lm, glm, ranger) to informed Bayesian priors, three-way
+    (elastic net, linear models, generalized linear models, ranger) to informed Bayesian priors, three-way
     forecast uncertainty decomposition (parameter / environmental / residual),
     and forecast shelf life analysis -- the quantification of when a forecast
     becomes uninformative. Designed for ecological and genomic forecasting

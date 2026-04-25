@@ -121,7 +121,7 @@
 #'     \item \code{"linpred"}: draws from \code{posterior_linpred}, which
 #'       capture only parameter uncertainty (no sigma).  Use this when
 #'       forecasting the \strong{mean response} — e.g. the expected ozone
-#'       across many similar days, or mean Δf across replicate populations.
+#'       across many similar days, or mean delta f across replicate populations.
 #'       These intervals are always narrower; they will under-cover individual
 #'       observations unless sigma is negligible.
 #'   }
