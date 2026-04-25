@@ -5,4 +5,4 @@
 ^\.claude$
 ^cran-comments\.md$
 ^\.positai$
-^\.gitignore$
+^\.github$
