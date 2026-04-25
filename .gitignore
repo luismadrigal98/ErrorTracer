@@ -6,3 +6,8 @@ data/et_sim.rda
 .RData
 .Rhistory
 .positai
+ErrorTracer.Rcheck
+ErrorTracer_1.0.0.tar.gz
+..Rcheck/00check.log
+..Rcheck/R_check_bin/R
+..Rcheck/R_check_bin/Rscript
