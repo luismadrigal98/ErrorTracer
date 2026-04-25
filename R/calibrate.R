@@ -1,8 +1,8 @@
 # R/calibrate.R -- et_calibrate() and et_diagnose()
 
-# ============================================================
+# ******************************************************************************
 # et_calibrate(): coverage probability assessment
-# ============================================================
+# ______________________________________________________________________________
 
 #' Assess calibration of posterior predictive intervals
 #'
@@ -118,9 +118,9 @@ et_calibrate.et_prediction_list <- function(predictions, observed,
        "Please supply response_col explicitly.")
 }
 
-# ============================================================
+# ******************************************************************************
 # et_diagnose(): MCMC convergence + LOO diagnostics
-# ============================================================
+# ______________________________________________________________________________
 
 #' Diagnose a fitted ErrorTracer model
 #'

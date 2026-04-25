@@ -1,8 +1,8 @@
 # R/predict.R -- et_predict(): posterior prediction with uncertainty propagation
 
-# ============================================================
+# ******************************************************************************
 # S3 generic
-# ============================================================
+# ______________________________________________________________________________
 
 #' Posterior prediction with uncertainty decomposition
 #'
@@ -176,11 +176,11 @@ et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
   UseMethod("et_predict")
 }
 
-# ============================================================
+# ******************************************************************************
 # Method: et_model (single model)
-# ============================================================
+# ______________________________________________________________________________
 
-#' @exportS3Method et_predict et_model
+#' @export
 et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   env_cov = NULL,
                                   env_dist = NULL,
@@ -319,11 +319,11 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   )
 }
 
-# ============================================================
+# ******************************************************************************
 # Method: et_model_list (grouped models)
-# ============================================================
+# ______________________________________________________________________________
 
-#' @exportS3Method et_predict et_model_list
+#' @export
 et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       env_cov = NULL,
                                       env_dist = NULL,
@@ -387,9 +387,9 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   )
 }
 
-# ============================================================
+# ******************************************************************************
 # Internal helpers
-# ============================================================
+# ______________________________________________________________________________
 
 # Compute lp for environmentally perturbed predictor values.
 # draws_mat : [n_perturb x n_params] posterior draws
@@ -549,11 +549,11 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   )
 }
 
-# ============================================================
+# ******************************************************************************
 # S3 methods for et_prediction
-# ============================================================
+# ______________________________________________________________________________
 
-#' @exportS3Method print et_prediction
+#' @export
 print.et_prediction <- function(x, ...) {
   cat("ErrorTracer prediction (et_prediction)\n")
   cat("  Observations  :", ncol(x$posterior_predict), "\n")
@@ -569,7 +569,7 @@ print.et_prediction <- function(x, ...) {
   invisible(x)
 }
 
-#' @exportS3Method print et_prediction_list
+#' @export
 print.et_prediction_list <- function(x, ...) {
   cat("ErrorTracer grouped predictions (et_prediction_list)\n")
   cat("  Grouping :", x$grouping, "\n")
