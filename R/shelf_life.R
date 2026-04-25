@@ -162,9 +162,9 @@ shelf_life.default <- function(predictions, ...) {
   stop("shelf_life() expects an et_prediction or et_prediction_list object.")
 }
 
-# ============================================================
+# ******************************************************************************
 # Internal: compute shelf life for a single et_prediction
-# ============================================================
+# ______________________________________________________________________________
 
 .compute_shelf_life_single <- function(predictions, plausible_range,
                                         ci_level, threshold, time_col,
@@ -216,9 +216,9 @@ shelf_life.default <- function(predictions, ...) {
   result
 }
 
-# ============================================================
+# ******************************************************************************
 # Internal: derive horizon from a single-group shelf-life table
-# ============================================================
+# ______________________________________________________________________________
 
 .compute_horizon <- function(sl_df, threshold, min_slope,
                              max_extrapolation_factor = 10) {
@@ -298,9 +298,9 @@ shelf_life.default <- function(predictions, ...) {
   )
 }
 
-# ============================================================
+# ******************************************************************************
 # Internal: format a horizon for printing
-# ============================================================
+# ______________________________________________________________________________
 
 .format_horizon <- function(hor) {
   if (is.null(hor)) return(NULL)
@@ -314,9 +314,9 @@ shelf_life.default <- function(predictions, ...) {
   )
 }
 
-# ============================================================
+# ******************************************************************************
 # S3 methods for et_shelf_life
-# ============================================================
+# ______________________________________________________________________________
 
 #' @export
 print.et_shelf_life <- function(x, ...) {
