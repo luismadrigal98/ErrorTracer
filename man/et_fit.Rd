@@ -84,8 +84,13 @@ use regularized-model coefficients as prior means; omit it for
 default (weakly informative) priors.
 }
 \examples{
-\dontrun{
-ps  <- extract_priors(lm(mpg ~ wt + hp, data = mtcars))
-fit <- et_fit(mpg ~ wt + hp, data = mtcars, priors = ps, chains = 2, iter = 1000)
+\donttest{
+set.seed(1)
+df  <- data.frame(y = rnorm(20), x1 = rnorm(20), x2 = rnorm(20))
+ps  <- extract_priors(lm(y ~ x1 + x2, data = df))
+fit <- et_fit(y ~ x1 + x2, data = df, priors = ps,
+              chains = 1, iter = 500, warmup = 250,
+              cores = 1, refresh = 0)
+print(fit)
 }
 }

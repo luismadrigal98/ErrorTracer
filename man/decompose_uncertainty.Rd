@@ -40,8 +40,16 @@ stored inside an \code{et_prediction} object:
 All variance components are guaranteed non-negative.
 }
 \examples{
-\dontrun{
-pred  <- et_predict(model, newdata = fcast_df, env_noise = list(Tmean = 0.5))
+\donttest{
+set.seed(1)
+df  <- data.frame(y = rnorm(20), x1 = rnorm(20))
+fit <- et_fit(y ~ x1, data = df,
+              chains = 1, iter = 500, warmup = 250,
+              cores = 1, refresh = 0)
+new_df <- data.frame(x1 = rnorm(5))
+pred   <- et_predict(fit, newdata = new_df,
+                     env_noise = list(x1 = 0.2),
+                     n_draws = 200, n_perturb = 50)
 decomp <- decompose_uncertainty(pred)
 head(decomp)
 }

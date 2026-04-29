@@ -35,8 +35,16 @@
 #'   }
 #'   For grouped predictions, a \code{group} column is prepended.
 #' @examples
-#' \dontrun{
-#' cal <- et_calibrate(pred, observed = validation_df, response_col = "z_diff")
+#' \donttest{
+#' set.seed(1)
+#' df  <- data.frame(y = rnorm(20), x1 = rnorm(20))
+#' fit <- et_fit(y ~ x1, data = df,
+#'               chains = 1, iter = 500, warmup = 250,
+#'               cores = 1, refresh = 0)
+#' valid_df <- data.frame(y = rnorm(5), x1 = rnorm(5))
+#' pred <- et_predict(fit, newdata = valid_df,
+#'                    n_draws = 200, n_perturb = 50)
+#' cal <- et_calibrate(pred, observed = valid_df, response_col = "y")
 #' print(cal)
 #' }
 #' @export

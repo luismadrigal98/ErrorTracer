@@ -49,10 +49,9 @@
 #'     \item{\code{multiplier}, \code{min_sd}}{Settings echo.}
 #'   }
 #' @examples
-#' \dontrun{
 #' fit_lm <- lm(mpg ~ wt + hp + cyl, data = mtcars)
 #' ps <- extract_priors(fit_lm, multiplier = 2, min_sd = 0.1)
-#' }
+#' print(ps)
 #' @export
 extract_priors <- function(model, multiplier = 2.0, min_sd = 0.1,
                            intercept_prior_sd = NULL, sigma_prior_scale = 1.0,

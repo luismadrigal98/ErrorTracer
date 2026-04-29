@@ -79,21 +79,22 @@
 #'   }
 #'
 #' @examples
-#' \dontrun{
-#' # Derive plausible_range from the training response
-#' # (arcsin-sqrt transformed allele frequencies are unbounded -- use data range)
+#' \donttest{
+#' set.seed(1)
+#' df  <- data.frame(y = rnorm(20), year = 2001:2020, x1 = rnorm(20))
+#' fit <- et_fit(y ~ x1, data = df,
+#'               chains = 1, iter = 500, warmup = 250,
+#'               cores = 1, refresh = 0)
+#' new_df <- data.frame(x1 = rnorm(10), year = 2021:2030)
+#' pred   <- et_predict(fit, newdata = new_df,
+#'                      n_draws = 200, n_perturb = 50)
 #' sl <- shelf_life(pred,
-#'                  plausible_range          = range(train_df$z_diff),
+#'                  plausible_range          = range(df$y),
 #'                  ci_level                 = 0.90,
 #'                  threshold                = 1.0,
 #'                  time_col                 = "year",
 #'                  max_extrapolation_factor = 10)
 #' print(sl)
-#'
-#' # Allow longer projections (or disable cap entirely):
-#' sl2 <- shelf_life(pred,
-#'                   plausible_range          = range(train_df$z_diff),
-#'                   max_extrapolation_factor = Inf)
 #' }
 #' @export
 shelf_life <- function(predictions,
