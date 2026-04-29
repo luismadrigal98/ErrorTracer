@@ -11,8 +11,8 @@ Description: Provides a full pipeline from regularized or standard regression
     models (elastic net, linear models, generalized linear models, random
     forests) to informed Bayesian priors, three-way forecast uncertainty
     decomposition (parameter / environmental / residual), and forecast shelf
-    life analysis -- the quantification of when a forecast becomes
-    uninformative. Designed for ecological and genomic forecasting with
+    life analysis (the quantification of when a forecast becomes
+    uninformative). Designed for ecological and genomic forecasting with
     climate or environmental covariates. Methods build on Bürkner (2017)
     <doi:10.18637/jss.v080.i01> for Bayesian regression via 'Stan',
     Friedman, Hastie, and Tibshirani (2010) <doi:10.18637/jss.v033.i01>
