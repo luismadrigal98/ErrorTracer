@@ -108,19 +108,26 @@
 #'   capped at the number of draws available in the fit).
 #' @param ci_levels Numeric vector.  Credible interval levels to compute
 #'   (default \code{c(0.5, 0.8, 0.9, 0.95)}).
-#' @param n_perturb Integer.  Number of draws used for the environmental
-#'   perturbation step (default \code{min(500, n_draws)}).  Reducing this
-#'   speeds up computation.
+#' @param n_perturb Integer.  Number of posterior draws used for the
+#'   environmental perturbation step (default \code{min(500, n_draws)}).
+#'   Reducing this speeds up computation.
+#' @param n_env_draws Integer.  Number of independent environmental
+#'   perturbations averaged \emph{per posterior draw} when estimating
+#'   \code{env_var} (default \code{1}).  Increasing this reduces Monte Carlo
+#'   noise on the environmental-variance estimate at the cost of proportional
+#'   computation.  The decomposition always reports a Monte Carlo SE
+#'   (\code{v_env_mcse}) alongside \code{env_var}; it decreases roughly like
+#'   \eqn{1/\sqrt{n\_env\_draws \cdot n\_perturb}}.
 #' @param interval_type Character.  Which draws to use when computing credible
 #'   intervals:
 #'   \itemize{
 #'     \item \code{"predictive"} (default): draws from \code{posterior_predict},
 #'       which include sigma (residual noise).  Use this when forecasting
-#'       \strong{individual observations} — e.g. a single population's allele
+#'       \strong{individual observations} --- e.g. a single population's allele
 #'       frequency, one site's ozone reading on a specific day.
 #'     \item \code{"linpred"}: draws from \code{posterior_linpred}, which
 #'       capture only parameter uncertainty (no sigma).  Use this when
-#'       forecasting the \strong{mean response} — e.g. the expected ozone
+#'       forecasting the \strong{mean response} --- e.g. the expected ozone
 #'       across many similar days, or mean delta f across replicate populations.
 #'       These intervals are always narrower; they will under-cover individual
 #'       observations unless sigma is negligible.
@@ -138,7 +145,7 @@
 #'   into the CI, which is typically what you want for sensitivity analyses
 #'   or whenever the reported interval should cover predictor-measurement
 #'   error.  When \code{FALSE} (default, backward compatible), CIs are based
-#'   on \code{posterior_predict} only — parameter + residual, without
+#'   on \code{posterior_predict} only --- parameter + residual, without
 #'   predictor noise.
 #' @param ... Passed to methods.
 #'
@@ -147,15 +154,20 @@
 #'   \item{\code{posterior_predict}}{Matrix \code{[n_draws x n_obs]}: full
 #'     posterior predictive draws (parameter + residual uncertainty).}
 #'   \item{\code{posterior_linpred}}{Matrix \code{[n_draws x n_obs]}: linear
-#'     predictor draws (parameter uncertainty only).}
+#'     predictor draws on the \strong{link scale} (parameter uncertainty only).}
 #'   \item{\code{lp_perturbed}}{Matrix \code{[n_perturb x n_obs]}: linear
-#'     predictor computed on environmentally perturbed inputs.}
-#'   \item{\code{sigma_draws}}{Numeric vector: posterior draws of sigma.}
+#'     predictor on the link scale computed on environmentally perturbed inputs.}
+#'   \item{\code{sigma_draws}}{Numeric vector: posterior draws of sigma
+#'     (\code{NA} for families without a sigma parameter, e.g.\ Binomial).}
 #'   \item{\code{credible_intervals}}{data.frame with columns
 #'     \code{row_id, ci_level, lower, median, upper, width}.}
-#'   \item{\code{decomposition}}{data.frame from
-#'     \code{decompose_uncertainty()}: \code{param_var, env_var,
-#'     residual_var, total_var}.}
+#'   \item{\code{decomposition}}{data.frame with columns
+#'     \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var}.
+#'     All components are on the \strong{response scale}.
+#'     \code{v_env_mcse} is the Monte Carlo SE of \code{env_var}.
+#'     \code{residual_var} is per-observation for non-Gaussian families
+#'     (e.g.\ Binomial: \eqn{E_s[\mu^{(s)}(1-\mu^{(s)})]}) and constant
+#'     for Gaussian.}
 #'   \item{\code{newdata}}{The input \code{newdata}.}
 #'   \item{\code{model}}{Reference to the \code{et_model} used.}
 #'   \item{\code{env_cov}}{The \eqn{p \times p} correlation matrix actually
@@ -171,6 +183,7 @@ et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
                         env_dist = NULL,
                         n_draws = 2000L, ci_levels = c(0.5, 0.8, 0.9, 0.95),
                         n_perturb = NULL,
+                        n_env_draws = 1L,
                         interval_type = c("predictive", "linpred"),
                         include_env_in_ci = FALSE, ...) {
   UseMethod("et_predict")
@@ -187,14 +200,16 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   n_draws = 2000L,
                                   ci_levels = c(0.5, 0.8, 0.9, 0.95),
                                   n_perturb = NULL,
+                                  n_env_draws = 1L,
                                   interval_type = c("predictive", "linpred"),
                                   include_env_in_ci = FALSE,
                                   ...) {
 
   interval_type <- match.arg(interval_type)
-  fit <- model$fit
-  pred_names <- .brms_pred_names(fit)
-  n_perturb <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
+  n_env_draws   <- max(1L, as.integer(n_env_draws))
+  fit           <- model$fit
+  pred_names    <- .brms_pred_names(fit)
+  n_perturb     <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
 
   # For EIV-fit models, posterior_predict() on newdata requires each se_<pred>
   # column present. Copy them over from the training data (recycled to the
@@ -239,21 +254,36 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
     }
   }
 
-  # --- 1. Posterior predictive (full uncertainty) ---
+  # Detect Gaussian identity link once; used to avoid a redundant
+  # posterior_linpred(transform=TRUE) call and to stay backward-compatible.
+  is_gauss_id <- .is_gaussian_identity(fit$family)
+
+  # --- 1. Posterior predictive (full uncertainty, response scale) ---
   pp <- brms::posterior_predict(fit, newdata = newdata, ndraws = n_draws)
 
-  # --- 2. Linear predictor (parameter uncertainty only) ---
+  # --- 2. Linear predictor draws (link scale, parameter uncertainty only) ---
   lp <- brms::posterior_linpred(fit, newdata = newdata, ndraws = n_draws)
 
-  # --- 3. Sigma draws ---
+  # --- 3. Response-scale parameter draws ---
+  # For Gaussian identity g^{-1}(eta) = eta, so mu_draws == lp — reuse it.
+  # For all other families, apply the inverse link to get the response scale.
+  mu_draws <- if (is_gauss_id) {
+    lp
+  } else {
+    brms::posterior_linpred(fit, newdata = newdata, ndraws = n_draws,
+                            transform = TRUE)
+  }
+
+  # --- 4. Draws matrix and dispersion parameters ---
   draws_mat   <- .brms_draws_matrix(fit, max_draws = max(n_draws, n_perturb))
   sigma_draws <- if ("sigma" %in% colnames(draws_mat)) {
     draws_mat[seq_len(n_draws), "sigma"]
   } else {
     rep(NA_real_, n_draws)
   }
+  disp_draws <- .extract_disp_draws(draws_mat, n_draws)
 
-  # --- 4. Perturbed linear predictor (environmental uncertainty) ---
+  # --- 5. Perturbed linear predictor (environmental uncertainty, link scale) ---
   # Short-circuit: if every predictor's noise is identically zero for every
   # observation, lp_perturbed == lp and env_var will be zero -- skip the loop.
   all_zero_noise <- all(vapply(noise_sds,
@@ -263,22 +293,29 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
     lp[seq_len(n_perturb), , drop = FALSE]
   } else {
     .compute_lp_perturbed(
-      draws_mat  = draws_mat[seq_len(n_perturb), , drop = FALSE],
-      newdata    = newdata,
-      pred_names = pred_names,
-      noise_sds  = noise_sds,   # named list of per-obs vectors
-      cor_mat    = cor_mat,     # p x p correlation over pred_names
-      dist_spec  = dist_spec    # named character: predictor -> distribution
+      draws_mat   = draws_mat[seq_len(n_perturb), , drop = FALSE],
+      newdata     = newdata,
+      pred_names  = pred_names,
+      noise_sds   = noise_sds,
+      cor_mat     = cor_mat,
+      dist_spec   = dist_spec,
+      n_env_draws = n_env_draws
     )
   }
 
-  # --- 5. Credible intervals ---
+  # --- 6. Response-scale perturbed draws (for decomposition) ---
+  mu_perturbed <- if (is_gauss_id) {
+    lp_perturbed
+  } else {
+    .apply_inv_link(lp_perturbed, fit$family)
+  }
+  mu_draws_sub <- mu_draws[seq_len(n_perturb), , drop = FALSE]
+
+  # --- 7. Credible intervals ---
   # Route to posterior_predict (includes sigma) or posterior_linpred (no sigma)
-  # depending on interval_type. The underlying matrices are always stored for
-  # decomposition regardless.
-  # When include_env_in_ci = TRUE and interval_type is predictive, rebuild
-  # predictive draws as lp_perturbed + sigma * N(0,1) so predictor noise is
-  # folded back into the credible interval.
+  # depending on interval_type. When include_env_in_ci = TRUE and interval_type
+  # is predictive, rebuild predictive draws as lp_perturbed + sigma * N(0,1)
+  # so predictor noise is folded back into the credible interval.
   ci_draws <- if (interval_type == "predictive") {
     if (isTRUE(include_env_in_ci) && !all_zero_noise) {
       .inflate_env_predictive(lp_perturbed, sigma_draws)
@@ -290,12 +327,14 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   }
   ci_df <- .compute_ci(ci_draws, ci_levels)
 
-  # --- 6. Decomposition ---
+  # --- 8. Decomposition (all components on response scale) ---
   decomp <- .decompose_from_arrays(
     pp           = pp,
-    lp           = lp,
-    lp_perturbed = lp_perturbed,
-    sigma_draws  = sigma_draws
+    mu_draws     = mu_draws,
+    mu_perturbed = mu_perturbed,
+    mu_draws_sub = mu_draws_sub,
+    family       = fit$family,
+    disp_draws   = disp_draws
   )
 
   structure(
@@ -330,6 +369,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       n_draws = 2000L,
                                       ci_levels = c(0.5, 0.8, 0.9, 0.95),
                                       n_perturb = NULL,
+                                      n_env_draws = 1L,
                                       interval_type = c("predictive", "linpred"),
                                       include_env_in_ci = FALSE,
                                       ...) {
@@ -366,6 +406,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
         n_draws           = n_draws,
         ci_levels         = ci_levels,
         n_perturb         = n_perturb,
+        n_env_draws       = n_env_draws,
         interval_type     = interval_type,
         include_env_in_ci = include_env_in_ci,
         ...
@@ -392,21 +433,20 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # ______________________________________________________________________________
 
 # Compute lp for environmentally perturbed predictor values.
-# draws_mat : [n_perturb x n_params] posterior draws
-# newdata   : data.frame of predictors
-# pred_names: character vector
-# noise_sds : named list; each element is a numeric vector of length n_obs
-#             giving the per-observation noise SD for that predictor.
-# cor_mat   : p x p correlation matrix over pred_names (identity = independent).
-#             Used to draw correlated standard-normal latents; marginal
-#             distributions are then applied per predictor via dist_spec.
-# dist_spec : named character vector (predictor -> distribution). Controls
-#             the marginal perturbation form (gaussian / lognormal / gamma
-#             / beta) via .perturb_predictor(). The correlation in cor_mat is
-#             applied on the Gaussian copula so rank correlations are
-#             preserved across distributions.
+# draws_mat   : [n_perturb x n_params] posterior draws
+# newdata     : data.frame of predictors
+# pred_names  : character vector
+# noise_sds   : named list; each element is a numeric vector of length n_obs
+#               giving the per-observation noise SD for that predictor.
+# cor_mat     : p x p correlation matrix over pred_names.
+# dist_spec   : named character vector (predictor -> distribution).
+# n_env_draws : number of perturbations to average per posterior draw.
+#               When > 1, the within-draw MC noise on the linear predictor is
+#               reduced by averaging k independent perturbations before taking
+#               the cross-draw variance.
 .compute_lp_perturbed <- function(draws_mat, newdata, pred_names, noise_sds,
-                                   cor_mat = NULL, dist_spec = NULL) {
+                                   cor_mat = NULL, dist_spec = NULL,
+                                   n_env_draws = 1L) {
   n_perturb <- nrow(draws_mat)
   n_obs     <- nrow(newdata)
   lp_mat    <- matrix(NA_real_, n_perturb, n_obs)
@@ -428,8 +468,6 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   }
 
   # Cholesky of the correlation sub-matrix restricted to available predictors.
-  # L is upper triangular with t(L) %*% L == R, so rows of Z %*% L with
-  # Z ~ N(0, I) have covariance R.
   L <- NULL
   if (!is.null(cor_mat)) {
     R_sub <- cor_mat[avail_preds, avail_preds, drop = FALSE]
@@ -444,8 +482,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     }
   }
 
-  # Stack per-predictor per-obs SDs into an n_obs x p matrix for elementwise
-  # scaling of the standardized draws.
+  # Stack per-predictor per-obs SDs into an n_obs x p matrix.
   sd_mat <- do.call(cbind, lapply(avail_preds, function(p) {
     v <- noise_sds[[p]]
     if (is.null(v)) rep(0, n_obs) else v
@@ -458,49 +495,60 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                  avail_preds)
   } else {
     missing_preds <- setdiff(avail_preds, names(dist_spec))
-    if (length(missing_preds)) {
-      dist_spec[missing_preds] <- "gaussian"
-    }
+    if (length(missing_preds)) dist_spec[missing_preds] <- "gaussian"
   }
 
-  # Original predictor values as a matrix for distributional perturbation.
   x_mat <- as.matrix(newdata[, avail_preds, drop = FALSE])
+  p     <- length(avail_preds)
 
   for (i in seq_len(n_perturb)) {
-    Z <- matrix(stats::rnorm(n_obs * length(avail_preds)),
-                n_obs, length(avail_preds))
-    if (!is.null(L)) Z <- Z %*% L
+    betas <- draws_mat[i, avail_betas]
 
-    xmat_p <- x_mat
-    for (k in seq_along(avail_preds)) {
-      p <- avail_preds[k]
-      xmat_p[, k] <- .perturb_predictor(
-        x     = x_mat[, k],
-        sigma = sd_mat[, k],
-        Z_std = Z[, k],
-        dist  = dist_spec[[p]]
-      )
+    if (n_env_draws <= 1L) {
+      # Single perturbation (original fast path)
+      Z <- matrix(stats::rnorm(n_obs * p), n_obs, p)
+      if (!is.null(L)) Z <- Z %*% L
+      xmat_p <- x_mat
+      for (k in seq_along(avail_preds)) {
+        xmat_p[, k] <- .perturb_predictor(
+          x     = x_mat[, k],
+          sigma = sd_mat[, k],
+          Z_std = Z[, k],
+          dist  = dist_spec[[avail_preds[k]]]
+        )
+      }
+      lp_mat[i, ] <- int_vals[i] + as.numeric(xmat_p %*% betas)
+    } else {
+      # Average n_env_draws perturbations; add the intercept once at the end.
+      lp_acc <- rep(0, n_obs)
+      for (j in seq_len(n_env_draws)) {
+        Z <- matrix(stats::rnorm(n_obs * p), n_obs, p)
+        if (!is.null(L)) Z <- Z %*% L
+        xmat_p <- x_mat
+        for (k in seq_along(avail_preds)) {
+          xmat_p[, k] <- .perturb_predictor(
+            x     = x_mat[, k],
+            sigma = sd_mat[, k],
+            Z_std = Z[, k],
+            dist  = dist_spec[[avail_preds[k]]]
+          )
+        }
+        lp_acc <- lp_acc + as.numeric(xmat_p %*% betas)
+      }
+      lp_mat[i, ] <- int_vals[i] + lp_acc / n_env_draws
     }
-
-    betas       <- draws_mat[i, avail_betas]
-    lp_mat[i, ] <- int_vals[i] + xmat_p %*% betas
   }
 
   lp_mat
 }
 
 # Fold environmental noise into the predictive draws by adding fresh
-# residual noise on top of the perturbed linear predictor. The result is a
-# matrix with the same shape as lp_perturbed whose column variance equals
-# approximately var(lp_perturbed) + mean(sigma_draws^2), so CIs built from
-# it cover parameter + env + residual uncertainty.
+# residual noise on top of the perturbed linear predictor.
 .inflate_env_predictive <- function(lp_perturbed, sigma_draws) {
   n_p  <- nrow(lp_perturbed)
   n_o  <- ncol(lp_perturbed)
   s    <- sigma_draws[seq_len(n_p)]
   s[is.na(s)] <- 0
-  # rnorm with vector sd is recycled element-wise; wrapping in matrix(, nrow=n_p)
-  # then aligns row i with sigma i since R fills column-major.
   eps  <- matrix(stats::rnorm(n_p * n_o, sd = rep(s, n_o)), nrow = n_p)
   lp_perturbed + eps
 }
@@ -532,20 +580,207 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 }
 
 # Core uncertainty decomposition from arrays.
-# Returns a data.frame with one row per observation.
-.decompose_from_arrays <- function(pp, lp, lp_perturbed, sigma_draws) {
+# All components are computed on the RESPONSE SCALE (g^{-1}(eta)) so that
+# the law of total variance holds: V_total ~ V_param + V_resid (when
+# env_noise = 0), and the three components are dimensionally consistent.
+#
+# pp           : [n_draws  x n_obs] posterior predictive draws (response scale)
+# mu_draws     : [n_draws  x n_obs] response-scale posterior means
+#                (= posterior_linpred(transform=TRUE); equals lp for Gaussian)
+# mu_perturbed : [n_perturb x n_obs] response-scale draws under env perturbation
+# mu_draws_sub : [n_perturb x n_obs] first n_perturb rows of mu_draws
+# family       : brms family object (used to dispatch residual variance)
+# disp_draws   : named list of dispersion parameter draws (sigma, phi, nu, shape)
+.decompose_from_arrays <- function(pp, mu_draws, mu_perturbed, mu_draws_sub,
+                                    family, disp_draws) {
   n_obs <- ncol(pp)
+  n_p   <- nrow(mu_perturbed)
+
+  # Parameter uncertainty: variance of the response-scale posterior mean.
+  param_var <- apply(mu_draws, 2, stats::var)
+
+  # Environmental variance: subtraction estimator on the response scale.
+  v_perturbed <- apply(mu_perturbed,   2, stats::var, na.rm = TRUE)
+  v_param_sub <- apply(mu_draws_sub,   2, stats::var)
+  env_var     <- pmax(v_perturbed - v_param_sub, 0)
+
+  # Monte Carlo SE of env_var.
+  # Uses the chi-squared approximation SE(Var) ~= Var * sqrt(2 / (n - 1)).
+  f_se       <- sqrt(2 / max(n_p - 1, 1))
+  v_env_mcse <- sqrt((v_perturbed * f_se)^2 + (v_param_sub * f_se)^2)
+
+  # Residual variance: family-specific expected within-draw variance.
+  residual_var <- .family_residual_var(family, mu_draws, disp_draws)
+
+  # Total variance: from the posterior predictive (response scale, unchanged).
+  total_var <- apply(pp, 2, stats::var)
+
   data.frame(
     obs_id       = seq_len(n_obs),
-    total_var    = apply(pp, 2, stats::var),
-    param_var    = apply(lp, 2, stats::var),
-    env_var      = pmax(
-      apply(lp_perturbed, 2, stats::var, na.rm = TRUE) -
-        apply(lp[seq_len(nrow(lp_perturbed)), , drop = FALSE], 2, stats::var),
-      0
-    ),
-    residual_var = mean(sigma_draws^2, na.rm = TRUE),
+    total_var    = total_var,
+    param_var    = param_var,
+    env_var      = env_var,
+    v_env_mcse   = v_env_mcse,
+    residual_var = residual_var,
     stringsAsFactors = FALSE
+  )
+}
+
+# ******************************************************************************
+# Internal: family-aware helpers
+# ______________________________________________________________________________
+
+# Returns TRUE for Gaussian family with identity link.
+# For this case posterior_linpred == posterior_linpred(transform=TRUE) and
+# the decomposition is identical to the pre-response-scale implementation.
+.is_gaussian_identity <- function(family) {
+  if (is.null(family)) return(TRUE)
+  fname <- tolower(family$family %||% "")
+  lname <- tolower(family$link   %||% "identity")
+  fname %in% c("gaussian", "normal") && lname == "identity"
+}
+
+# Apply the inverse link function g^{-1} to a matrix of link-scale values.
+# Returns a matrix of the same dimensions on the response scale.
+# Falls back to the identity (no transform) when the link is unknown.
+.apply_inv_link <- function(lp_mat, family) {
+  if (is.null(family)) return(lp_mat)
+  link_str <- family$link %||% "identity"
+  if (link_str == "identity") return(lp_mat)
+
+  linkinv <- tryCatch(
+    family$linkinv %||% stats::make.link(link_str)$linkinv,
+    error = function(e) NULL
+  )
+  if (is.null(linkinv)) {
+    linkinv <- tryCatch(stats::make.link(link_str)$linkinv,
+                        error = function(e) NULL)
+  }
+  if (is.null(linkinv)) {
+    .et_warn("Could not determine inverse link for '", link_str,
+             "'; response-scale decomposition may be on the link scale.")
+    return(lp_mat)
+  }
+
+  matrix(linkinv(as.vector(lp_mat)), nrow = nrow(lp_mat), ncol = ncol(lp_mat))
+}
+
+# Compute the expected within-draw variance E_s[Var(y | mu^(s))] for the
+# supported brms families. Returns a numeric vector of length n_obs.
+#
+# For Gaussian the residual variance is constant across observations (sigma^2);
+# for all other supported families it is observation-specific because the
+# variance function V(mu) depends on the fitted mean.
+#
+# Supported families and their variance functions V(mu):
+#   gaussian / normal : sigma^2                        (scalar, constant)
+#   student           : sigma^2 * nu / (nu - 2)       (scalar, nu > 2)
+#   binomial / bernoulli : mu * (1 - mu)
+#   poisson           : mu
+#   negbinomial       : mu + mu^2 / shape
+#   beta              : mu * (1 - mu) / (phi + 1)
+#   gamma             : mu^2 / shape
+#
+# Unsupported families return NA with a warning.
+.family_residual_var <- function(family, mu_draws, disp_draws) {
+  n_obs <- ncol(mu_draws)
+  n_s   <- nrow(mu_draws)
+  fname <- tolower(family$family %||% "gaussian")
+
+  # Helper: fetch first n_s rows of a named dispersion vector.
+  get_d <- function(name) {
+    v <- disp_draws[[name]]
+    if (is.null(v) || all(is.na(v))) return(NULL)
+    v[seq_len(min(n_s, length(v)))]
+  }
+
+  if (fname %in% c("gaussian", "normal")) {
+    sigma <- get_d("sigma")
+    v <- if (!is.null(sigma)) mean(sigma^2, na.rm = TRUE) else NA_real_
+    return(rep(v, n_obs))
+  }
+
+  if (fname == "student") {
+    sigma <- get_d("sigma")
+    nu    <- get_d("nu")
+    if (is.null(sigma) || is.null(nu)) return(rep(NA_real_, n_obs))
+    valid <- !is.na(nu) & nu > 2
+    v <- if (any(valid)) {
+      mean(sigma[valid]^2 * nu[valid] / (nu[valid] - 2), na.rm = TRUE)
+    } else NA_real_
+    return(rep(v, n_obs))
+  }
+
+  if (fname %in% c("binomial", "bernoulli")) {
+    # V(mu) = mu * (1 - mu), averaged over posterior draws.
+    return(colMeans(mu_draws * (1 - mu_draws), na.rm = TRUE))
+  }
+
+  if (fname == "poisson") {
+    # V(mu) = mu (mean == variance for Poisson).
+    return(colMeans(mu_draws, na.rm = TRUE))
+  }
+
+  if (fname %in% c("negbinomial", "negbinomial2", "neg_binomial_2")) {
+    # V(mu, shape) = mu + mu^2 / shape.
+    shape <- get_d("shape")
+    if (is.null(shape)) {
+      .et_warn("negbinomial 'shape' draws not found; falling back to Poisson residual.")
+      return(colMeans(mu_draws, na.rm = TRUE))
+    }
+    # shape is length n_s; broadcast over n_obs columns via sweep.
+    return(colMeans(
+      mu_draws + sweep(mu_draws^2, 1, shape, "/"),
+      na.rm = TRUE
+    ))
+  }
+
+  if (fname == "beta") {
+    # V(mu, phi) = mu * (1 - mu) / (phi + 1) — brms uses precision phi.
+    phi <- get_d("phi")
+    if (is.null(phi)) {
+      .et_warn("beta 'phi' draws not found; returning mu*(1-mu) approximation.")
+      return(colMeans(mu_draws * (1 - mu_draws), na.rm = TRUE))
+    }
+    return(colMeans(
+      sweep(mu_draws * (1 - mu_draws), 1, 1 + phi, "/"),
+      na.rm = TRUE
+    ))
+  }
+
+  if (fname %in% c("gamma", "gamma2")) {
+    # V(mu, shape) = mu^2 / shape.
+    shape <- get_d("shape")
+    if (is.null(shape)) return(rep(NA_real_, n_obs))
+    return(colMeans(
+      sweep(mu_draws^2, 1, shape, "/"),
+      na.rm = TRUE
+    ))
+  }
+
+  .et_warn(
+    "Family '", fname, "' is not supported for the response-scale residual ",
+    "variance decomposition. residual_var will be NA. ",
+    "Supported: gaussian, student, binomial, bernoulli, poisson, ",
+    "negbinomial, beta, gamma."
+  )
+  rep(NA_real_, n_obs)
+}
+
+# Extract dispersion parameter draws from the full draws matrix.
+# Always returns a named list with elements sigma, phi, shape, nu.
+# Missing columns produce NULL entries.
+.extract_disp_draws <- function(draws_mat, n_draws) {
+  cols    <- colnames(draws_mat)
+  n_use   <- min(n_draws, nrow(draws_mat))
+  get_col <- function(name) {
+    if (name %in% cols) draws_mat[seq_len(n_use), name] else NULL
+  }
+  list(
+    sigma = get_col("sigma"),
+    phi   = get_col("phi"),
+    shape = get_col("shape"),
+    nu    = get_col("nu")
   )
 }
 
@@ -562,10 +797,11 @@ print.et_prediction <- function(x, ...) {
   cat("  Interval type :", if (is.null(x$interval_type)) "predictive" else x$interval_type, "\n")
   decomp <- x$decomposition
   cat("  Mean var decomposition (across observations):\n")
-  cat(sprintf("    Parameter  : %.4f\n", mean(decomp$param_var)))
-  cat(sprintf("    Environmental: %.4f\n", mean(decomp$env_var)))
-  cat(sprintf("    Residual   : %.4f\n", mean(decomp$residual_var)))
-  cat(sprintf("    Total      : %.4f\n", mean(decomp$total_var)))
+  cat(sprintf("    Parameter    : %.4f\n", mean(decomp$param_var)))
+  cat(sprintf("    Environmental: %.4f  (MC SE: %.4f)\n",
+              mean(decomp$env_var), mean(decomp$v_env_mcse)))
+  cat(sprintf("    Residual     : %.4f\n", mean(decomp$residual_var, na.rm = TRUE)))
+  cat(sprintf("    Total        : %.4f\n", mean(decomp$total_var)))
   invisible(x)
 }
 
