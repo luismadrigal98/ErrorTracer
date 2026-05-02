@@ -31,7 +31,7 @@
 # v_env_mcse == 0 when env_noise = 0 (mu_perturbed == mu_draws_sub)
 # ---------------------------------------------------------------------------
 
-test_that("v_env_mcse is zero when mu_perturbed equals mu_draws_sub", {
+test_that("env_var and v_env_mcse are zero when mu_perturbed equals mu_draws_sub", {
   set.seed(1)
   n_draws <- 100; n_obs <- 4
   mu_draws  <- matrix(rnorm(n_draws * n_obs), nrow = n_draws)
@@ -39,7 +39,7 @@ test_that("v_env_mcse is zero when mu_perturbed equals mu_draws_sub", {
   sigma     <- abs(rnorm(n_draws, 0.5))
   disp      <- list(sigma = sigma, phi = NULL, shape = NULL, nu = NULL)
 
-  # Perturbed == draws_sub → V_perturbed == V_param_sub → both SE terms zero
+  # Perturbed == draws_sub (same object) → v_env_raw == 0 exactly → SE = 0
   d <- ErrorTracer:::.decompose_from_arrays(
     pp           = pp,
     mu_draws     = mu_draws,

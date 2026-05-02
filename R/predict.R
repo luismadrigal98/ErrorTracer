@@ -602,12 +602,19 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   # Environmental variance: subtraction estimator on the response scale.
   v_perturbed <- apply(mu_perturbed,   2, stats::var, na.rm = TRUE)
   v_param_sub <- apply(mu_draws_sub,   2, stats::var)
-  env_var     <- pmax(v_perturbed - v_param_sub, 0)
+  v_env_raw   <- v_perturbed - v_param_sub
+  env_var     <- pmax(v_env_raw, 0)
 
   # Monte Carlo SE of env_var.
   # Uses the chi-squared approximation SE(Var) ~= Var * sqrt(2 / (n - 1)).
+  # When v_env_raw == 0 exactly the two matrices are from the same sample
+  # (all_zero_noise path); env_var = 0 by construction, so SE = 0.
   f_se       <- sqrt(2 / max(n_p - 1, 1))
-  v_env_mcse <- sqrt((v_perturbed * f_se)^2 + (v_param_sub * f_se)^2)
+  v_env_mcse <- ifelse(
+    v_env_raw == 0,
+    0,
+    sqrt((v_perturbed * f_se)^2 + (v_param_sub * f_se)^2)
+  )
 
   # Residual variance: family-specific expected within-draw variance.
   residual_var <- .family_residual_var(family, mu_draws, disp_draws)
