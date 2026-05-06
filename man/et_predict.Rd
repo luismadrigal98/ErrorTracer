@@ -13,6 +13,7 @@ et_predict(
   n_draws = 2000L,
   ci_levels = c(0.5, 0.8, 0.9, 0.95),
   n_perturb = NULL,
+  n_env_draws = 1L,
   interval_type = c("predictive", "linpred"),
   include_env_in_ci = FALSE,
   ...
@@ -125,6 +126,14 @@ capped at the number of draws available in the fit).}
 \item{n_perturb}{Integer.  Number of draws used for the environmental
 perturbation step (default \code{min(500, n_draws)}).  Reducing this
 speeds up computation.}
+
+\item{n_env_draws}{Integer.  Number of independent perturbations to average
+\emph{within} each posterior draw before computing the cross-draw variance
+(default \code{1L}).  Increasing this reduces Monte Carlo noise in
+\code{env_var}: variance decreases like \eqn{1/\sqrt{n\_env\_draws}}.  The
+output shape is always \code{[n_perturb x n_obs]} regardless of this setting.
+Inspect \code{v_env_mcse} in the decomposition to assess whether further
+averaging is needed.}
 
 \item{interval_type}{Character.  Which draws to use when computing credible
 intervals:

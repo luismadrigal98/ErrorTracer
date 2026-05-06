@@ -1,8 +1,8 @@
 Package: ErrorTracer
 Type: Package
 Title: Bayesian Error Propagation and Forecast Uncertainty Decomposition
-Version: 1.0.2
-Date: 2026-04-29
+Version: 1.1.0
+Date: 2026-05-06
 Authors@R: c(
     person(given = "Luis Javier", family = "Madrigal-Roca", role = c("aut", "cre"), email = "madrigalrocalj@yahoo.com"),
     person(given = "John", family = "Kelly", role = "aut", email = "jkk@ku.edu")
@@ -23,7 +23,6 @@ Description: Provides a full pipeline from regularized or standard regression
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.3.3
 Depends: 
     R (>= 4.1.0)
 Imports:
@@ -46,3 +45,4 @@ Suggests:
     covr
 Config/testthat/edition: 3
 VignetteBuilder: knitr
+Config/roxygen2/version: 8.0.0

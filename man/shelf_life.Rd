@@ -6,28 +6,30 @@
 \usage{
 shelf_life(
   predictions,
-  plausible_range,
+  response_scale,
   ci_level = 0.9,
   threshold = 1,
   time_col = NULL,
   min_slope_for_projection = 1e-04,
   max_extrapolation_factor = 10,
-  ...
+  ...,
+  plausible_range = NULL
 )
 }
 \arguments{
 \item{predictions}{An \code{et_prediction} or \code{et_prediction_list}.}
 
-\item{plausible_range}{Numeric vector of length 2 (\code{c(min, max)})
-giving the plausible range of the response.  For unbounded responses
-(e.g.\ arcsin-transformed allele-frequency change) use
-\code{range(training_data$response)} or a biologically motivated interval.
-The effective range is \code{diff(plausible_range)}.}
+\item{response_scale}{Numeric vector of length 2 (\code{c(min, max)})
+giving the response scale used as the denominator in the
+CI-width / range ratio.  For unbounded responses use
+\code{range(training_data$response)} as a conservative default, or
+supply a biologically motivated interval.
+The effective range is \code{diff(response_scale)}.}
 
 \item{ci_level}{Numeric.  The credible interval level to use (default
 0.90).  Must be present in the \code{et_prediction} object.}
 
-\item{threshold}{Numeric.  CI width / plausible range above which the
+\item{threshold}{Numeric.  CI width / response scale above which the
 forecast is uninformative (default 1.0).}
 
 \item{time_col}{Character.  Optional column in
@@ -47,6 +49,9 @@ the result is reported as a lower bound instead of a projection.
 Set to \code{Inf} to disable the cap.  Default \code{10}.}
 
 \item{...}{Unused.}
+
+\item{plausible_range}{Deprecated.  Use \code{response_scale} instead.
+Provided for backward compatibility; emits a warning when used.}
 }
 \value{
 An \code{et_shelf_life} object (a \code{data.frame}) with columns:
@@ -54,8 +59,8 @@ An \code{et_shelf_life} object (a \code{data.frame}) with columns:
     \item{obs_id}{Observation index.}
     \item{time}{Time axis value.}
     \item{ci_width}{Width of the credible interval at \code{ci_level}.}
-    \item{plausible_range}{Effective plausible range (scalar).}
-    \item{ratio}{CI width / plausible range.}
+    \item{plausible_range}{Effective response scale (scalar diff).}
+    \item{ratio}{CI width / response scale.}
     \item{informative}{Logical; \code{TRUE} when ratio < threshold.}
   }
   For grouped predictions a \code{group} column is prepended.
@@ -63,8 +68,9 @@ An \code{et_shelf_life} object (a \code{data.frame}) with columns:
   \describe{
     \item{\code{horizon}}{Named list with elements \code{value},
       \code{type} (\code{"observed"}, \code{"projected"}, or
-      \code{"lower_bound"}), \code{last_informative}, and
-      \code{description}.}
+      \code{"lower_bound"}), \code{last_informative},
+      \code{description}, and (for projected only) \code{se_t_star}
+      (delta-method standard error of the projected crossing time).}
     \item{\code{horizon_by_group}}{For grouped objects: named list of
       per-group horizon lists.}
     \item{\code{threshold}}{The threshold value used.}
@@ -72,8 +78,8 @@ An \code{et_shelf_life} object (a \code{data.frame}) with columns:
 }
 \description{
 Quantifies \emph{when} a forecast becomes uninformative by comparing the
-width of credible intervals to a plausible response range.  A forecast is
-uninformative when its CI width exceeds \code{threshold * plausible_range}.
+width of credible intervals to a response scale.  A forecast is
+uninformative when its CI width exceeds \code{threshold * response_scale}.
 }
 \details{
 The function operates in three modes depending on the available data and
@@ -86,7 +92,10 @@ whether the uninformative threshold is crossed within the forecast window:
   \item{\strong{Projected}}{All forecast periods remain informative but
     the CI/range ratio is trending upward.  A linear trend is fitted to
     the ratios and extrapolated to estimate when the threshold would be
-    reached.}
+    reached.  The projected crossing time \eqn{t^* = (\tau - a) / b}
+    (where \eqn{\tau} is the threshold, \eqn{a} the fitted intercept,
+    \eqn{b} the fitted slope) is reported together with \code{se_t_star},
+    a delta-method standard error.}
   \item{\strong{Lower bound}}{All forecast periods are informative with
     no upward trend in the ratio.  The shelf life is reported as a lower
     bound: \code{> last observed time}.}
@@ -113,7 +122,7 @@ new_df <- data.frame(x1 = rnorm(10), year = 2021:2030)
 pred   <- et_predict(fit, newdata = new_df,
                      n_draws = 200, n_perturb = 50)
 sl <- shelf_life(pred,
-                 plausible_range          = range(df$y),
+                 response_scale           = range(df$y),
                  ci_level                 = 0.90,
                  threshold                = 1.0,
                  time_col                 = "year",
