@@ -3,8 +3,8 @@
 #' Compute the forecast shelf life
 #'
 #' Quantifies \emph{when} a forecast becomes uninformative by comparing the
-#' width of credible intervals to a plausible response range.  A forecast is
-#' uninformative when its CI width exceeds \code{threshold * plausible_range}.
+#' width of credible intervals to a response scale.  A forecast is
+#' uninformative when its CI width exceeds \code{threshold * response_scale}.
 #'
 #' The function operates in three modes depending on the available data and
 #' whether the uninformative threshold is crossed within the forecast window:
@@ -16,7 +16,10 @@
 #'   \item{\strong{Projected}}{All forecast periods remain informative but
 #'     the CI/range ratio is trending upward.  A linear trend is fitted to
 #'     the ratios and extrapolated to estimate when the threshold would be
-#'     reached.}
+#'     reached.  The projected crossing time \eqn{t^* = (\tau - a) / b}
+#'     (where \eqn{\tau} is the threshold, \eqn{a} the fitted intercept,
+#'     \eqn{b} the fitted slope) is reported together with a Monte Carlo
+#'     standard error \code{se_t_star} derived via the delta method.}
 #'   \item{\strong{Lower bound}}{All forecast periods are informative with
 #'     no upward trend in the ratio.  The shelf life is reported as a lower
 #'     bound: \code{> last observed time}.}
@@ -33,14 +36,15 @@
 #' }
 #'
 #' @param predictions An \code{et_prediction} or \code{et_prediction_list}.
-#' @param plausible_range Numeric vector of length 2 (\code{c(min, max)})
-#'   giving the plausible range of the response.  For unbounded responses
-#'   (e.g.\ arcsin-transformed allele-frequency change) use
-#'   \code{range(training_data$response)} or a biologically motivated interval.
-#'   The effective range is \code{diff(plausible_range)}.
+#' @param response_scale Numeric vector of length 2 (\code{c(min, max)})
+#'   giving the response scale used as the denominator in the
+#'   CI-width / range ratio.  For unbounded responses use
+#'   \code{range(training_data$response)} as a conservative default, or
+#'   supply a biologically motivated interval.
+#'   The effective range is \code{diff(response_scale)}.
 #' @param ci_level Numeric.  The credible interval level to use (default
 #'   0.90).  Must be present in the \code{et_prediction} object.
-#' @param threshold Numeric.  CI width / plausible range above which the
+#' @param threshold Numeric.  CI width / response scale above which the
 #'   forecast is uninformative (default 1.0).
 #' @param time_col Character.  Optional column in
 #'   \code{predictions$newdata} to use as the time axis.  If \code{NULL},
@@ -56,14 +60,15 @@
 #'   the result is reported as a lower bound instead of a projection.
 #'   Set to \code{Inf} to disable the cap.  Default \code{10}.
 #' @param ... Unused.
+#' @param plausible_range Deprecated.  Use \code{response_scale} instead.
 #'
 #' @return An \code{et_shelf_life} object (a \code{data.frame}) with columns:
 #'   \describe{
 #'     \item{obs_id}{Observation index.}
 #'     \item{time}{Time axis value.}
 #'     \item{ci_width}{Width of the credible interval at \code{ci_level}.}
-#'     \item{plausible_range}{Effective plausible range (scalar).}
-#'     \item{ratio}{CI width / plausible range.}
+#'     \item{plausible_range}{Effective response scale (scalar diff).}
+#'     \item{ratio}{CI width / response scale.}
 #'     \item{informative}{Logical; \code{TRUE} when ratio < threshold.}
 #'   }
 #'   For grouped predictions a \code{group} column is prepended.
@@ -71,8 +76,8 @@
 #'   \describe{
 #'     \item{\code{horizon}}{Named list with elements \code{value},
 #'       \code{type} (\code{"observed"}, \code{"projected"}, or
-#'       \code{"lower_bound"}), \code{last_informative}, and
-#'       \code{description}.}
+#'       \code{"lower_bound"}), \code{last_informative},
+#'       \code{description}, and (for projected) \code{se_t_star}.}
 #'     \item{\code{horizon_by_group}}{For grouped objects: named list of
 #'       per-group horizon lists.}
 #'     \item{\code{threshold}}{The threshold value used.}
@@ -89,37 +94,59 @@
 #' pred   <- et_predict(fit, newdata = new_df,
 #'                      n_draws = 200, n_perturb = 50)
 #' sl <- shelf_life(pred,
-#'                  plausible_range          = range(df$y),
-#'                  ci_level                 = 0.90,
-#'                  threshold                = 1.0,
-#'                  time_col                 = "year",
-#'                  max_extrapolation_factor = 10)
+#'                  response_scale            = range(df$y),
+#'                  ci_level                  = 0.90,
+#'                  threshold                 = 1.0,
+#'                  time_col                  = "year",
+#'                  max_extrapolation_factor  = 10)
 #' print(sl)
 #' }
 #' @export
 shelf_life <- function(predictions,
-                       plausible_range,
+                       response_scale,
                        ci_level = 0.90,
                        threshold = 1.0,
                        time_col = NULL,
                        min_slope_for_projection = 1e-4,
                        max_extrapolation_factor = 10,
-                       ...) {
+                       ...,
+                       plausible_range = NULL) {
+  # Deprecated alias: plausible_range -> response_scale
+  if (!is.null(plausible_range)) {
+    if (!missing(response_scale)) {
+      stop("Cannot specify both 'response_scale' and 'plausible_range'.")
+    }
+    warning(
+      "'plausible_range' is deprecated; use 'response_scale' instead.",
+      call. = FALSE
+    )
+    return(shelf_life(
+      predictions              = predictions,
+      response_scale           = plausible_range,
+      ci_level                 = ci_level,
+      threshold                = threshold,
+      time_col                 = time_col,
+      min_slope_for_projection = min_slope_for_projection,
+      max_extrapolation_factor = max_extrapolation_factor,
+      ...
+    ))
+  }
   UseMethod("shelf_life")
 }
 
 #' @export
 shelf_life.et_prediction <- function(predictions,
-                                     plausible_range,
+                                     response_scale,
                                      ci_level = 0.90,
                                      threshold = 1.0,
                                      time_col = NULL,
                                      min_slope_for_projection = 1e-4,
                                      max_extrapolation_factor = 10,
-                                     ...) {
+                                     ...,
+                                     plausible_range = NULL) {
   .compute_shelf_life_single(
     predictions = predictions,
-    plausible_range = plausible_range,
+    response_scale = response_scale,
     ci_level = ci_level,
     threshold = threshold,
     time_col = time_col,
@@ -130,13 +157,14 @@ shelf_life.et_prediction <- function(predictions,
 
 #' @export
 shelf_life.et_prediction_list <- function(predictions,
-                                          plausible_range,
+                                          response_scale,
                                           ci_level = 0.90,
                                           threshold = 1.0,
                                           time_col = NULL,
                                           min_slope_for_projection = 1e-4,
                                           max_extrapolation_factor = 10,
-                                          ...) {
+                                          ...,
+                                          plausible_range = NULL) {
   horizon_by_group <- list()
 
   parts <- lapply(names(predictions$predictions), function(g) {
@@ -144,7 +172,7 @@ shelf_life.et_prediction_list <- function(predictions,
     if (is.null(pred)) return(NULL)
 
     sl <- .compute_shelf_life_single(
-      pred, plausible_range, ci_level, threshold,
+      pred, response_scale, ci_level, threshold,
       time_col, min_slope_for_projection, max_extrapolation_factor
     )
     horizon_by_group[[g]] <<- attr(sl, "horizon")
@@ -167,7 +195,7 @@ shelf_life.default <- function(predictions, ...) {
 # Internal: compute shelf life for a single et_prediction
 # ______________________________________________________________________________
 
-.compute_shelf_life_single <- function(predictions, plausible_range,
+.compute_shelf_life_single <- function(predictions, response_scale,
                                         ci_level, threshold, time_col,
                                         min_slope_for_projection,
                                         max_extrapolation_factor = 10) {
@@ -184,11 +212,11 @@ shelf_life.default <- function(predictions, ...) {
 
   ci_sub <- ci_df[ci_df$ci_level == ci_level, ]
 
-  if (length(plausible_range) != 2) {
-    stop("plausible_range must be a numeric vector of length 2: c(min, max).")
+  if (length(response_scale) != 2) {
+    stop("response_scale must be a numeric vector of length 2: c(min, max).")
   }
-  pr <- abs(diff(plausible_range))
-  if (pr < 1e-12) stop("plausible_range min and max are equal.")
+  pr <- abs(diff(response_scale))
+  if (pr < 1e-12) stop("response_scale min and max are equal.")
 
   time_vals <- if (!is.null(time_col) &&
                    time_col %in% colnames(predictions$newdata)) {
@@ -253,6 +281,14 @@ shelf_life.default <- function(predictions, ...) {
     if (!is.na(slope) && slope > min_slope) {
       proj <- (threshold - b0) / slope
 
+      # SE of t* via delta method: t* = (tau - a) / b
+      # d(t*)/d(a) = -1/b,  d(t*)/d(b) = -(tau - a)/b^2 = -t*/b
+      vc   <- stats::vcov(lm_fit)
+      va   <- vc["(Intercept)", "(Intercept)"]
+      vb   <- vc["times", "times"]
+      cab  <- vc["(Intercept)", "times"]
+      se_t_star <- sqrt(max(0, (va + proj^2 * vb + 2 * proj * cab) / slope^2))
+
       # Cap extrapolation: if projection exceeds last_ok + factor * window,
       # the trend is too flat to give a meaningful estimate -- report lower bound.
       window   <- max(times) - min(times)
@@ -277,11 +313,13 @@ shelf_life.default <- function(predictions, ...) {
         value = proj,
         type = "projected",
         last_informative = last_ok,
+        se_t_star = se_t_star,
         slope = slope,
         description = paste0(
           "All ", nrow(sl_df), " forecast periods informative. ",
           "Linear trend (slope = ", round(slope, 5), " per time unit) ",
-          "projects threshold crossing at ~", round(proj, 1), "."
+          "projects threshold crossing at ~", round(proj, 1),
+          " (SE = ", round(se_t_star, 2), ")."
         )
       ))
     }
