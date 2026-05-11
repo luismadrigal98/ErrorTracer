@@ -32,14 +32,14 @@
 #'     }
 #'   }
 #'   \item{\code{forecast}}{
-#'     \code{data.frame} with 10 rows and 5 columns (2 clusters \eqn{\times}
-#'     5 forecast years, 2015–2019).  Same columns as \code{train} except
+#'     \code{data.frame} with 30 rows and 5 columns (2 clusters \eqn{\times}
+#'     15 forecast years, 2015–2029).  Same columns as \code{train} except
 #'     \code{z_diff} is absent — these are the prediction targets.  Predictors
 #'     are standardised using the training-period statistics stored in
 #'     \code{standardization}.
 #'   }
 #'   \item{\code{validation}}{
-#'     \code{data.frame} with 10 rows and 3 columns (\code{year},
+#'     \code{data.frame} with 30 rows and 3 columns (\code{year},
 #'     \code{cluster_id}, \code{z_diff}).  True response values for the
 #'     forecast period; used with \code{\link{et_calibrate}} to assess
 #'     posterior predictive coverage.
@@ -77,7 +77,8 @@
 #'
 #' @details
 #' The climate time series are simulated as AR(1) processes with a warming
-#' trend in \code{Tmean} (+0.05 °C yr\eqn{^{-1}}).  \code{SWE} is derived
+#' trend in \code{Tmean} (+0.015 °C yr\eqn{^{-1}}, cumulating to ~0.30 SD
+#' above the training mean over the 15-year forecast window).  \code{SWE} is derived
 #' from \code{Tmean} and \code{PPT} to introduce physically motivated
 #' covariance (colder winters produce more snowpack; wetter winters also
 #' increase snowpack).  All predictors are standardised using training-period

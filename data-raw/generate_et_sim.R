@@ -19,7 +19,7 @@ set.seed(111)
 # site, linked to three climate predictors.
 #
 # Training period : 1995-2014  (20 years per cluster → 40 rows)
-# Forecast period : 2015-2019  (5 years per cluster  → 10 rows)
+# Forecast period : 2015-2029  (15 years per cluster → 30 rows)
 #
 # Predictors (all standardised using training-period mean and SD):
 #   Tmean  — mean growing-season temperature (°C)
@@ -37,12 +37,12 @@ set.seed(111)
 # ============================================================
 
 n_train <- 20L
-n_fcast <-  5L
-n_total <- n_train + n_fcast   # 25 years
+n_fcast <- 15L
+n_total <- n_train + n_fcast   # 35 years
 
-years_all   <- 1995:2019
+years_all   <- 1995:2029
 years_train <- 1995:2014
-years_fcast <- 2015:2019
+years_fcast <- 2015:2029
 train_idx   <- seq_len(n_train)
 fcast_idx   <- (n_train + 1L):n_total
 
@@ -57,7 +57,8 @@ true_params <- list(
 # ============================================================
 # Tmean: AR(1) with mild warming trend.
 #   phi = 0.40 (moderate persistence), drift = 0.015°C/yr
-#   This keeps forecast values within ~1.5 SDs of training mean.
+#   Over 15 forecast years the cumulative drift is ~0.30 SD (standardised),
+#   producing a mild but detectable out-of-distribution extrapolation.
 Tmean_raw        <- numeric(n_total)
 Tmean_raw[1L]    <- 14.5
 for (t in 2L:n_total) {
@@ -169,7 +170,7 @@ et_sim <- list(
   description = paste(
     "Simulated allele-frequency-change (z_diff) for two SNP clusters (A, B)",
     "at a mountain plant site. Training: 1995-2014 (20 obs/cluster).",
-    "Forecast: 2015-2019 (5 obs/cluster). Three standardised climate",
+    "Forecast: 2015-2029 (15 obs/cluster). Three standardised climate",
     "predictors (Tmean, PPT, SWE). True coefficients in et_sim$true_params.",
     "Generated with set.seed(111). See data-raw/generate_et_sim.R."
   )
@@ -179,8 +180,8 @@ et_sim <- list(
 # 4. Quick sanity checks
 # ============================================================
 stopifnot(nrow(et_sim$train) == 40L)
-stopifnot(nrow(et_sim$forecast) == 10L)
-stopifnot(nrow(et_sim$validation) == 10L)
+stopifnot(nrow(et_sim$forecast) == 30L)
+stopifnot(nrow(et_sim$validation) == 30L)
 stopifnot(all(c("year","cluster_id","Tmean","PPT","SWE","z_diff") %in% names(et_sim$train)))
 stopifnot(!("z_diff" %in% names(et_sim$forecast)))  # predictors only
 
