@@ -22,7 +22,9 @@
                                threshold = 1.0,
                                seed = 42) {
   set.seed(seed)
-  n_draws <- 300
+  # 301 draws so stats::quantile(., 0.05) lands on order statistic 16 and
+  # stats::quantile(., 0.95) on order statistic 286 (type 7, no interpolation).
+  n_draws <- 301L
   times <- seq_len(n_obs)
 
   # Target CI widths from the linear model (on ratio scale, times pr)
@@ -30,10 +32,14 @@
     rnorm(n_obs, sd = noise_sd * pr)
   target_widths <- pmax(target_widths, 0.01 * pr)
 
-  # Build pp matrix whose 90% CI width matches target_widths
+  # Build pp deterministically so the empirical 90% CI width equals
+  # target_widths[j] exactly — no Monte Carlo noise.
+  # Linear spread with x[16] = -w/2 and x[286] = +w/2.
+  k <- seq_len(n_draws)
+  base <- (k - 16L) / 270  # base[16] = 0, base[286] = 1
   pp <- matrix(NA_real_, n_draws, n_obs)
   for (j in seq_len(n_obs)) {
-    pp[, j] <- rnorm(n_draws, sd = target_widths[j] / (2 * qnorm(0.95)))
+    pp[, j] <- target_widths[j] * (base - 0.5)
   }
 
   lp  <- pp + matrix(rnorm(n_draws * n_obs, sd = 1e-4), n_draws, n_obs)
@@ -73,17 +79,19 @@ test_that("projected t* equals (tau - a) / b for exact linear width trend", {
                              noise_sd = 0, pr = 1.0, threshold = threshold,
                              seed = 1)
 
-  sl  <- shelf_life(pred, response_scale = c(0, 1), threshold = threshold,
-                    min_slope_for_projection = 1e-10,
-                    max_extrapolation_factor = Inf)
+  sl  <- suppressWarnings(  # lm() warns "essentially perfect fit" on exact data
+    shelf_life(pred, response_scale = c(0, 1), threshold = threshold,
+               min_slope_for_projection = 1e-10,
+               max_extrapolation_factor = Inf)
+  )
   hor <- attr(sl, "horizon")
 
   expect_equal(hor$type, "projected")
 
   # Recover the linear fit parameters from the ratios directly
   lm_fit <- lm(sl$ratio ~ sl$time)
-  a_fit  <- coef(lm_fit)[1]
-  b_fit  <- coef(lm_fit)[2]
+  a_fit  <- unname(coef(lm_fit)[1])
+  b_fit  <- unname(coef(lm_fit)[2])
   t_star_expected <- (threshold - a_fit) / b_fit
 
   expect_equal(hor$value, t_star_expected, tolerance = 1e-6)
@@ -138,9 +146,11 @@ test_that("true t* lies within projected t* ± 2 se_t_star", {
 test_that("se_t_star is near zero when CI widths follow an exact linear trend", {
   pred <- .mock_pred_linear(n_obs = 8, a_true = 0.10, b_true = 0.09,
                              noise_sd = 0, seed = 5)
-  sl  <- shelf_life(pred, response_scale = c(0, 1),
-                    min_slope_for_projection = 1e-10,
-                    max_extrapolation_factor = Inf)
+  sl  <- suppressWarnings(  # lm() warns "essentially perfect fit" on exact data
+    shelf_life(pred, response_scale = c(0, 1),
+               min_slope_for_projection = 1e-10,
+               max_extrapolation_factor = Inf)
+  )
   hor <- attr(sl, "horizon")
 
   expect_equal(hor$type, "projected")

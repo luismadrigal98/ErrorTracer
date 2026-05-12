@@ -91,7 +91,13 @@ test_that("print.et_prediction runs without error", {
   lp  <- pp
   lp_p <- pp
   sigma <- abs(rnorm(n_d, 0.5, 0.1))
-  decomp <- ErrorTracer:::.decompose_from_arrays(pp, lp, lp_p, sigma)
+  gauss_family <- list(family = "gaussian", link = "identity",
+                       linkinv = identity)
+  disp_draws   <- list(sigma = sigma, phi = NULL, shape = NULL, nu = NULL)
+  decomp <- ErrorTracer:::.decompose_from_arrays(
+    pp = pp, mu_draws = lp, mu_perturbed = lp_p, mu_draws_sub = lp,
+    family = gauss_family, disp_draws = disp_draws
+  )
   ci_df  <- ErrorTracer:::.compute_ci(pp, c(0.9))
   pred <- structure(
     list(posterior_predict = pp, posterior_linpred = lp,
