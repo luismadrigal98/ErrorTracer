@@ -7,7 +7,7 @@
 et_sensitivity_profile(
   model,
   newdata,
-  plausible_range,
+  response_scale,
   fraction_grid = NULL,
   absolute_grid = NULL,
   env_cov = NULL,
@@ -20,7 +20,8 @@ et_sensitivity_profile(
   n_draws = 2000L,
   n_perturb = NULL,
   max_extrapolation_factor = 10,
-  verbose = TRUE
+  verbose = TRUE,
+  plausible_range = NULL
 )
 }
 \arguments{
@@ -28,8 +29,9 @@ et_sensitivity_profile(
 
 \item{newdata}{\code{data.frame} passed to \code{et_predict}.}
 
-\item{plausible_range}{Two-element numeric vector, as in
-\code{\link{shelf_life}}.}
+\item{response_scale}{Two-element numeric vector \code{c(min, max)}, as in
+\code{\link{shelf_life}}.  The effective range is
+\code{diff(response_scale)}.}
 
 \item{fraction_grid}{Optional numeric vector of scalar noise fractions.}
 
@@ -60,6 +62,8 @@ holding the CI fixed at parameter + residual.}
 \item{max_extrapolation_factor}{Passed to \code{shelf_life}.}
 
 \item{verbose}{Logical.  If \code{TRUE} (default), logs each iteration.}
+
+\item{plausible_range}{Deprecated.  Use \code{response_scale} instead.}
 }
 \value{
 An \code{et_sensitivity} object: a \code{data.frame} with one row
@@ -84,7 +88,7 @@ An \code{et_sensitivity} object: a \code{data.frame} with one row
     \item{\code{horizon_description}}{The long description returned by
       \code{shelf_life}.}
   }
-  The returned object carries the original call and \code{plausible_range}
+  The returned object carries the original call and \code{response_scale}
   as attributes for use by \code{\link{et_plot_sensitivity}}.
 }
 \description{

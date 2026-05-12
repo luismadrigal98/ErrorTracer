@@ -36,8 +36,10 @@
 #'
 #' @param model An \code{et_model} from \code{\link{et_fit}}.
 #' @param newdata \code{data.frame} passed to \code{et_predict}.
-#' @param plausible_range Two-element numeric vector, as in
-#'   \code{\link{shelf_life}}.
+#' @param response_scale Two-element numeric vector \code{c(min, max)}, as in
+#'   \code{\link{shelf_life}}.  The effective range is
+#'   \code{diff(response_scale)}.
+#' @param plausible_range Deprecated.  Use \code{response_scale} instead.
 #' @param fraction_grid Optional numeric vector of scalar noise fractions.
 #' @param absolute_grid Optional \code{list} of \code{env_noise} arguments
 #'   (each a named list / vector).  If supplied together with
@@ -80,7 +82,7 @@
 #'     \item{\code{horizon_description}}{The long description returned by
 #'       \code{shelf_life}.}
 #'   }
-#'   The returned object carries the original call and \code{plausible_range}
+#'   The returned object carries the original call and \code{response_scale}
 #'   as attributes for use by \code{\link{et_plot_sensitivity}}.
 #'
 #' @seealso \code{\link{et_predict}}, \code{\link{shelf_life}},
@@ -88,7 +90,7 @@
 #' @export
 et_sensitivity_profile <- function(model,
                                    newdata,
-                                   plausible_range,
+                                   response_scale,
                                    fraction_grid = NULL,
                                    absolute_grid = NULL,
                                    env_cov = NULL,
@@ -101,7 +103,20 @@ et_sensitivity_profile <- function(model,
                                    n_draws = 2000L,
                                    n_perturb = NULL,
                                    max_extrapolation_factor = 10,
-                                   verbose = TRUE) {
+                                   verbose = TRUE,
+                                   plausible_range = NULL) {
+
+  # Deprecated alias: plausible_range -> response_scale
+  if (!is.null(plausible_range)) {
+    if (!missing(response_scale)) {
+      stop("Cannot specify both 'response_scale' and 'plausible_range'.")
+    }
+    warning(
+      "'plausible_range' is deprecated; use 'response_scale' instead.",
+      call. = FALSE
+    )
+    response_scale <- plausible_range
+  }
 
   if (!inherits(model, "et_model")) {
     stop("et_sensitivity_profile() expects an et_model object. ",
@@ -134,7 +149,7 @@ et_sensitivity_profile <- function(model,
     )
     sl <- shelf_life(
       predictions              = pred,
-      plausible_range          = plausible_range,
+      response_scale           = response_scale,
       ci_level                 = ci_level,
       threshold                = threshold,
       time_col                 = time_col,
@@ -169,9 +184,9 @@ et_sensitivity_profile <- function(model,
 
   out <- do.call(rbind, rows)
   out <- structure(out, class = c("et_sensitivity", "data.frame"))
-  attr(out, "plausible_range") <- plausible_range
-  attr(out, "ci_level")        <- ci_level
-  attr(out, "threshold")       <- threshold
+  attr(out, "response_scale") <- response_scale
+  attr(out, "ci_level")       <- ci_level
+  attr(out, "threshold")      <- threshold
   out
 }
 
@@ -226,7 +241,7 @@ print.et_sensitivity <- function(x, ...) {
   cat("ErrorTracer sensitivity profile (et_sensitivity)\n")
   cat("  Grid steps        :", nrow(x), "\n")
   cat("  CI level          :", attr(x, "ci_level"), "\n")
-  cat("  Plausible range   :", diff(attr(x, "plausible_range")), "\n")
+  cat("  Response scale    :", diff(attr(x, "response_scale")), "\n")
   cat("  Threshold         :", attr(x, "threshold"), "\n")
   tab <- as.data.frame(x)[, c("label", "env_var", "env_share", "ratio_mean",
                               "horizon_type", "horizon"), drop = FALSE]
