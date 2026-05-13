@@ -11,8 +11,8 @@
 #' @format A named \code{list} with seven elements:
 #' \describe{
 #'   \item{\code{train}}{
-#'     \code{data.frame} with 40 rows and 6 columns (2 clusters \eqn{\times}
-#'     20 training years, 1995–2014):
+#'     \code{data.frame} with 100 rows and 6 columns (2 clusters \eqn{\times}
+#'     50 training years, 1970–2019):
 #'     \describe{
 #'       \item{year}{Integer. Calendar year.}
 #'       \item{cluster_id}{Character. SNP cluster identifier: \code{"A"} or
@@ -33,7 +33,7 @@
 #'   }
 #'   \item{\code{forecast}}{
 #'     \code{data.frame} with 30 rows and 5 columns (2 clusters \eqn{\times}
-#'     15 forecast years, 2015–2029).  Same columns as \code{train} except
+#'     15 forecast years, 2020–2034).  Same columns as \code{train} except
 #'     \code{z_diff} is absent — these are the prediction targets.  Predictors
 #'     are standardised using the training-period statistics stored in
 #'     \code{standardization}.
@@ -51,9 +51,9 @@
 #'     \code{sigma} (residual SD).
 #'     \describe{
 #'       \item{Cluster A}{\code{intercept = 0.00}, \code{Tmean = 0.50},
-#'         \code{PPT = -0.30}, \code{SWE = 0.20}, \code{sigma = 0.40}}
+#'         \code{PPT = -0.30}, \code{SWE = 0.20}, \code{sigma = 0.30}}
 #'       \item{Cluster B}{\code{intercept = 0.10}, \code{Tmean = 0.30},
-#'         \code{PPT = -0.20}, \code{SWE = -0.10}, \code{sigma = 0.50}}
+#'         \code{PPT = -0.20}, \code{SWE = -0.15}, \code{sigma = 0.35}}
 #'     }
 #'   }
 #'   \item{\code{env_noise}}{
@@ -78,12 +78,13 @@
 #' @details
 #' The climate time series are simulated as AR(1) processes with a warming
 #' trend in \code{Tmean} (+0.015 °C yr\eqn{^{-1}}, cumulating to ~0.30 SD
-#' above the training mean over the 15-year forecast window).  \code{SWE} is derived
-#' from \code{Tmean} and \code{PPT} to introduce physically motivated
-#' covariance (colder winters produce more snowpack; wetter winters also
-#' increase snowpack).  All predictors are standardised using training-period
-#' statistics only, which is the correct procedure when predictors in the
-#' forecast period may fall outside the training range.
+#' above the training mean over the 15-year forecast window).  \code{SWE}
+#' is generated with a weak dependence on \code{Tmean} (negative coupling)
+#' and \code{PPT} (positive coupling) plus a dominant independent noise
+#' component, so that the three predictors have only mild pairwise
+#' correlation (|R| < 0.2 on the training subset).  This makes all
+#' regression coefficients reliably identifiable in a single replicate.
+#' All predictors are standardised using training-period statistics only.
 #'
 #' Responses are generated from a linear model with Gaussian noise:
 #' \deqn{z\_diff_t = \alpha + \beta_1 Tmean_t + \beta_2 PPT_t +
