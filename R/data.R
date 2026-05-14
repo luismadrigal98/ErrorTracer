@@ -86,6 +86,14 @@
 #' regression coefficients reliably identifiable in a single replicate.
 #' All predictors are standardised using training-period statistics only.
 #'
+#' In addition to the three real climate predictors, the dataset includes
+#' ten independent standardised nuisance predictors \code{d1}, ..., \code{d10}
+#' with zero true effect on the response.  They give the regularized-prior
+#' extraction step a real selection job: cv.glmnet (alpha = 0.5) is expected
+#' to identify the three real predictors and shrink the ten dummies toward
+#' zero.  Without them, regularization on three well-identified predictors
+#' merely biases the true coefficients without selecting anything.
+#'
 #' Responses are generated from a linear model with Gaussian noise:
 #' \deqn{z\_diff_t = \alpha + \beta_1 Tmean_t + \beta_2 PPT_t +
 #'       \beta_3 SWE_t + \varepsilon_t, \quad \varepsilon_t \sim
