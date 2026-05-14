@@ -106,6 +106,27 @@ PPT_std   <- (PPT_raw   - ppt_mu)   / ppt_sd
 SWE_std   <- (SWE_raw   - swe_mu)   / swe_sd
 
 # ============================================================
+# 1b. Simulate dummy nuisance predictors d1, ..., d10
+# ============================================================
+# Ten standardised noise predictors with no true effect on z_diff.
+# They give the regularized-prior extraction step (cv.glmnet,
+# alpha=0.5) something to do: identify the three real predictors and
+# shrink the ten dummies toward zero.  Without them, regularization
+# on three well-identified predictors merely biases the true
+# coefficients without selecting anything.
+n_dummy <- 10L
+set.seed(2222L)
+dummies_raw <- matrix(stats::rnorm(n_total * n_dummy), n_total, n_dummy)
+dummy_names <- paste0("d", seq_len(n_dummy))
+colnames(dummies_raw) <- dummy_names
+# Standardise dummies using TRAINING-period statistics (consistent with the
+# real predictors)
+dummy_mu <- colMeans(dummies_raw[train_idx, , drop = FALSE])
+dummy_sd <- apply(dummies_raw[train_idx, , drop = FALSE], 2, stats::sd)
+dummies_std <- sweep(dummies_raw, 2, dummy_mu, "-")
+dummies_std <- sweep(dummies_std, 2, dummy_sd, "/")
+
+# ============================================================
 # 2. Simulate cluster-specific responses
 # ============================================================
 .make_cluster_data <- function(cluster_name, params, seed_offset) {
@@ -114,6 +135,9 @@ SWE_std   <- (SWE_raw   - swe_mu)   / swe_sd
   X      <- cbind(Tmean_std, PPT_std, SWE_std)
   mu_all <- params["intercept"] + X %*% params[c("Tmean", "PPT", "SWE")]
   z_all  <- as.numeric(mu_all) + stats::rnorm(n_total, 0, params["sigma"])
+
+  dummies_train <- as.data.frame(dummies_std[train_idx, , drop = FALSE])
+  dummies_fcast <- as.data.frame(dummies_std[fcast_idx, , drop = FALSE])
 
   train_df <- data.frame(
     year       = years_train,
@@ -124,6 +148,7 @@ SWE_std   <- (SWE_raw   - swe_mu)   / swe_sd
     z_diff     = z_all[train_idx],
     stringsAsFactors = FALSE
   )
+  train_df <- cbind(train_df, dummies_train)
 
   forecast_df <- data.frame(
     year       = years_fcast,
@@ -133,6 +158,7 @@ SWE_std   <- (SWE_raw   - swe_mu)   / swe_sd
     SWE        = SWE_std[fcast_idx],
     stringsAsFactors = FALSE
   )
+  forecast_df <- cbind(forecast_df, dummies_fcast)
 
   validation_df <- data.frame(
     year       = years_fcast,
@@ -169,8 +195,14 @@ et_sim <- list(
   # True data-generating parameters (for parameter-recovery checks)
   true_params = true_params,
 
-  # Suggested environmental noise SDs for et_predict()
-  env_noise = list(Tmean = 0.30, PPT = 0.20, SWE = 0.15),
+  # Suggested environmental noise SDs for et_predict().  The d1..d10
+  # nuisance predictors enter the model with zero true effect, so
+  # measurement noise on them does not contribute to predictive
+  # uncertainty -- env_noise = 0 is the principled choice.
+  env_noise = c(
+    list(Tmean = 0.30, PPT = 0.20, SWE = 0.15),
+    stats::setNames(as.list(rep(0, n_dummy)), dummy_names)
+  ),
 
   # Training-period standardisation constants
   standardization = list(
@@ -183,8 +215,12 @@ et_sim <- list(
     "Simulated allele-frequency-change (z_diff) for two SNP clusters (A, B)",
     "at a mountain plant site. Training: 1970-2019 (50 obs/cluster).",
     "Forecast: 2020-2034 (15 obs/cluster). Three standardised climate",
-    "predictors (Tmean, PPT, SWE) with low pairwise correlation so that",
-    "all regression coefficients are reliably identified in a single replicate.",
+    "predictors (Tmean, PPT, SWE) with low pairwise correlation, plus",
+    "ten independent nuisance predictors (d1..d10) with zero true effect",
+    "on the response.  The nuisance predictors give the regularized-",
+    "regression -> informative-prior pipeline a real selection job:",
+    "cv.glmnet (alpha=0.5) is expected to shrink them toward zero while",
+    "preserving the three real coefficients.",
     "True coefficients in et_sim$true_params.",
     "Generated with set.seed(111). See data-raw/generate_et_sim.R."
   )
@@ -196,8 +232,10 @@ et_sim <- list(
 stopifnot(nrow(et_sim$train) == 2L * n_train)         # 100
 stopifnot(nrow(et_sim$forecast) == 2L * n_fcast)      # 30
 stopifnot(nrow(et_sim$validation) == 2L * n_fcast)    # 30
-stopifnot(all(c("year","cluster_id","Tmean","PPT","SWE","z_diff") %in% names(et_sim$train)))
+stopifnot(all(c("year","cluster_id","Tmean","PPT","SWE","z_diff",
+                dummy_names) %in% names(et_sim$train)))
 stopifnot(!("z_diff" %in% names(et_sim$forecast)))
+stopifnot(all(dummy_names %in% names(et_sim$forecast)))
 
 # Predictor correlation diagnostics (training subset)
 train_A <- et_sim$train[et_sim$train$cluster_id == "A", ]
@@ -211,20 +249,29 @@ cat("Forecast Tmean range (std):", round(range(fcast_A$Tmean), 2), "\n")
 cat("Forecast PPT range   (std):", round(range(fcast_A$PPT), 2), "\n")
 cat("Forecast SWE range   (std):", round(range(fcast_A$SWE), 2), "\n")
 
-# Quick OLS recovery check on training data (one replicate)
-for (cl in c("A", "B")) {
-  d <- et_sim$train[et_sim$train$cluster_id == cl, ]
-  fit <- lm(z_diff ~ Tmean + PPT + SWE, data = d)
-  est <- coef(fit)[c("Tmean", "PPT", "SWE")]
-  se  <- sqrt(diag(vcov(fit)))[c("Tmean", "PPT", "SWE")]
-  tru <- true_params[[cl]][c("Tmean", "PPT", "SWE")]
-  cat(sprintf("\nCluster %s OLS recovery (n=%d):\n", cl, nrow(d)))
-  cat(sprintf("  truth:    %s\n", paste(sprintf("%+.3f", tru), collapse = "  ")))
-  cat(sprintf("  estimate: %s\n", paste(sprintf("%+.3f", est), collapse = "  ")))
-  cat(sprintf("  SE:       %s\n", paste(sprintf(" %.3f", se), collapse = "  ")))
-  lo <- est - 1.96 * se; hi <- est + 1.96 * se
-  covered <- tru >= lo & tru <= hi
-  cat(sprintf("  95%% CI covers truth: %d / 3\n", sum(covered)))
+# Quick recovery check on training data (one replicate).  Uses cv.glmnet
+# (alpha=0.5) with all 13 predictors so we can verify both that the three
+# real coefficients are recovered and that the ten d1..d10 dummies are
+# correctly shrunk toward zero.
+if (requireNamespace("glmnet", quietly = TRUE)) {
+  all_preds <- c("Tmean", "PPT", "SWE", dummy_names)
+  for (cl in c("A", "B")) {
+    d <- et_sim$train[et_sim$train$cluster_id == cl, ]
+    X <- as.matrix(d[, all_preds])
+    set.seed(3333L + match(cl, c("A", "B")))
+    cvfit <- glmnet::cv.glmnet(X, d$z_diff, alpha = 0.5, nfolds = 5)
+    cf <- as.numeric(coef(cvfit, s = "lambda.min"))[-1]   # drop intercept
+    names(cf) <- all_preds
+    cat(sprintf("\nCluster %s elastic-net recovery (n=%d, p=%d, alpha=0.5):\n",
+                cl, nrow(d), length(all_preds)))
+    cat("  true predictors (truth -> estimate):\n")
+    tru <- true_params[[cl]][c("Tmean", "PPT", "SWE")]
+    for (p in c("Tmean", "PPT", "SWE")) {
+      cat(sprintf("    %-5s  %+.3f -> %+.3f\n", p, tru[p], cf[p]))
+    }
+    cat("  dummies (max |coef|):", sprintf("%.3f", max(abs(cf[dummy_names]))),
+        "  (n nonzero:", sum(abs(cf[dummy_names]) > 1e-8), "/", n_dummy, ")\n")
+  }
 }
 
 # ============================================================
