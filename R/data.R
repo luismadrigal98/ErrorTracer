@@ -53,7 +53,7 @@
 #'       \item{Cluster A}{\code{intercept = 0.00}, \code{Tmean = 0.50},
 #'         \code{PPT = -0.30}, \code{SWE = 0.20}, \code{sigma = 0.30}}
 #'       \item{Cluster B}{\code{intercept = 0.10}, \code{Tmean = 0.30},
-#'         \code{PPT = -0.20}, \code{SWE = -0.15}, \code{sigma = 0.35}}
+#'         \code{PPT = -0.20}, \code{SWE = -0.25}, \code{sigma = 0.35}}
 #'     }
 #'   }
 #'   \item{\code{env_noise}}{

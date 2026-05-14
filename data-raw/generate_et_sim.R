@@ -18,7 +18,7 @@ set.seed(111)
 # change (z_diff) in two SNP clusters (A and B) at a mountain plant
 # site, linked to three climate predictors.
 #
-# Training period : 1970-2019  (50 years per cluster -> 100 rows)
+# Training period : 1920-2019  (100 years per cluster -> 200 rows)
 # Forecast period : 2020-2034  (15 years per cluster -> 30 rows)
 #
 # Predictors (all standardised using training-period mean and SD):
@@ -36,7 +36,7 @@ set.seed(111)
 #
 # True data-generating model:
 #   Cluster A:  z_diff = 0.50*Tmean - 0.30*PPT + 0.20*SWE + eps,  eps ~ N(0, 0.30)
-#   Cluster B:  z_diff = 0.30*Tmean - 0.20*PPT - 0.15*SWE + eps,  eps ~ N(0, 0.35)
+#   Cluster B:  z_diff = 0.30*Tmean - 0.20*PPT - 0.25*SWE + eps,  eps ~ N(0, 0.35)
 #
 # Design rationale (n_train=50, low predictor correlation, tighter sigma):
 # At n=50 with cor(predictors) ~ 0.2 and the sigmas above, the standard
@@ -46,11 +46,11 @@ set.seed(111)
 # ~0.05 of truth.
 # ============================================================
 
-n_train <- 50L
+n_train <- 100L
 n_fcast <- 15L
-n_total <- n_train + n_fcast   # 65 years
+n_total <- n_train + n_fcast   # 115 years
 
-years_train <- seq(2019L - n_train + 1L, 2019L)            # 1970-2019
+years_train <- seq(2019L - n_train + 1L, 2019L)            # 1920-2019
 years_fcast <- seq(2020L, 2020L + n_fcast - 1L)            # 2020-2034
 years_all   <- c(years_train, years_fcast)
 train_idx   <- seq_len(n_train)
@@ -59,7 +59,7 @@ fcast_idx   <- (n_train + 1L):n_total
 # True regression parameters
 true_params <- list(
   A = c(intercept =  0.00, Tmean =  0.50, PPT = -0.30, SWE =  0.20, sigma = 0.30),
-  B = c(intercept =  0.10, Tmean =  0.30, PPT = -0.20, SWE = -0.15, sigma = 0.35)
+  B = c(intercept =  0.10, Tmean =  0.30, PPT = -0.20, SWE = -0.25, sigma = 0.35)
 )
 
 # ============================================================
