@@ -24,6 +24,20 @@
   data frame gains a `v_env_mcse` column reporting the chi-squared standard
   error of `env_var`.
 
+## Bug fixes
+
+* `et_plot_calibration()` previously only recognised a column literally
+  named `group` as the sub-group identifier. Calibration data frames built
+  by binding per-group results with descriptive column names
+  (e.g.\ `cluster_id`, `species`, `regime`) were silently collapsed into a
+  single un-grouped series, producing plots with multiple overlapping
+  points per nominal level and a zig-zagging connecting line. The function
+  now auto-detects any single non-canonical column (anything other than
+  `ci_level`, `nominal`, `observed_coverage`, `n_obs`, `calibration_error`,
+  `sharpness`) with more than one unique value and uses it as the grouping
+  variable. A new `group_col` argument allows the grouping column to be
+  set explicitly, or `group_col = NA` to force a single un-grouped series.
+
 # ErrorTracer 1.0.0
 
 * Initial CRAN submission.
