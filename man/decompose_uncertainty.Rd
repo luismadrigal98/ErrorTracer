@@ -14,38 +14,30 @@ decompose_uncertainty(predictions, ...)
 }
 \value{
 A \code{data.frame} with columns
-  \code{obs_id, param_var, env_var, v_env_mcse, residual_var, total_var}.
+  \code{obs_id, param_var, env_var, residual_var, total_var}.
   For grouped predictions, a \code{group} column is prepended.
 }
 \description{
 Returns a \code{data.frame} with the three-way uncertainty decomposition
-stored inside an \code{et_prediction} object.  All components are computed
-on the \strong{response scale} via the inverse link \eqn{g^{-1}}, making
-the decomposition consistent for any \code{brms}-supported family (Gaussian,
-Binomial, Poisson, Negative-Binomial, Beta, Gamma, Student-\eqn{t}).
+stored inside an \code{et_prediction} object:
 \describe{
-  \item{param_var}{Response-scale variance of \eqn{g^{-1}(\eta^{(s)})} across
-    posterior draws — captures uncertainty in fitted regression coefficients.}
-  \item{env_var}{Additional response-scale variance arising from measurement or
+  \item{param_var}{Variance of the posterior linear predictor — captures
+    uncertainty in fitted regression coefficients.}
+  \item{env_var}{Additional variance arising from measurement or
     prediction uncertainty in the predictor values (estimated via
     perturbation in \code{\link{et_predict}}).  Zero when
     \code{env_noise = NULL}.}
-  \item{v_env_mcse}{Monte Carlo standard error of \code{env_var}, computed via
-    the chi-squared approximation \eqn{\mathrm{SE}(\hat V) \approx \hat V \sqrt{2/(n-1)}}.
-    Zero when \code{env_noise = NULL} or when the no-noise short-circuit path
-    is taken.  Use \code{n_env_draws} in \code{\link{et_predict}} to reduce this.}
-  \item{residual_var}{Family-specific posterior mean of the conditional variance
-    \eqn{E_s[V(\mu^{(s)})]}: \eqn{\sigma^2} for Gaussian, \eqn{\mu(1-\mu)} for
-    Binomial, \eqn{\mu} for Poisson, etc.  Per-observation for non-Gaussian
-    families.}
-  \item{total_var}{Variance of the full posterior predictive draws.}
+  \item{residual_var}{Posterior mean of \eqn{\sigma^2} — biological
+    process noise, unmeasured drivers, and drift. Using the mean (not
+    median) ensures \code{param_var + residual_var} \eqn{\approx}{~} \code{total_var}
+    by the law of total variance.}
+  \item{total_var}{Variance of the full posterior predictive draws
+    (parameter + residual; note that \code{env_var} is an additive
+    component measured separately from the perturbation step).}
 }
 }
 \details{
-All variance components are guaranteed non-negative.  The sum
-\code{param_var + env_var + residual_var} approximates \code{total_var} up to
-Monte Carlo error and non-linear coupling between parameter and environmental
-noise.
+All variance components are guaranteed non-negative.
 }
 \examples{
 \donttest{

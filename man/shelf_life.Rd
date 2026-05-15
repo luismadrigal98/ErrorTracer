@@ -50,8 +50,7 @@ Set to \code{Inf} to disable the cap.  Default \code{10}.}
 
 \item{...}{Unused.}
 
-\item{plausible_range}{Deprecated.  Use \code{response_scale} instead.
-Provided for backward compatibility; emits a warning when used.}
+\item{plausible_range}{Deprecated.  Use \code{response_scale} instead.}
 }
 \value{
 An \code{et_shelf_life} object (a \code{data.frame}) with columns:
@@ -69,8 +68,7 @@ An \code{et_shelf_life} object (a \code{data.frame}) with columns:
     \item{\code{horizon}}{Named list with elements \code{value},
       \code{type} (\code{"observed"}, \code{"projected"}, or
       \code{"lower_bound"}), \code{last_informative},
-      \code{description}, and (for projected only) \code{se_t_star}
-      (delta-method standard error of the projected crossing time).}
+      \code{description}, and (for projected) \code{se_t_star}.}
     \item{\code{horizon_by_group}}{For grouped objects: named list of
       per-group horizon lists.}
     \item{\code{threshold}}{The threshold value used.}
@@ -94,8 +92,8 @@ whether the uninformative threshold is crossed within the forecast window:
     the ratios and extrapolated to estimate when the threshold would be
     reached.  The projected crossing time \eqn{t^* = (\tau - a) / b}
     (where \eqn{\tau} is the threshold, \eqn{a} the fitted intercept,
-    \eqn{b} the fitted slope) is reported together with \code{se_t_star},
-    a delta-method standard error.}
+    \eqn{b} the fitted slope) is reported together with a Monte Carlo
+    standard error \code{se_t_star} derived via the delta method.}
   \item{\strong{Lower bound}}{All forecast periods are informative with
     no upward trend in the ratio.  The shelf life is reported as a lower
     bound: \code{> last observed time}.}
@@ -122,11 +120,11 @@ new_df <- data.frame(x1 = rnorm(10), year = 2021:2030)
 pred   <- et_predict(fit, newdata = new_df,
                      n_draws = 200, n_perturb = 50)
 sl <- shelf_life(pred,
-                 response_scale           = range(df$y),
-                 ci_level                 = 0.90,
-                 threshold                = 1.0,
-                 time_col                 = "year",
-                 max_extrapolation_factor = 10)
+                 response_scale            = range(df$y),
+                 ci_level                  = 0.90,
+                 threshold                 = 1.0,
+                 time_col                  = "year",
+                 max_extrapolation_factor  = 10)
 print(sl)
 }
 }

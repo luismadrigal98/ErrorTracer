@@ -115,10 +115,33 @@ et_plot_shelf_life <- function(sl, show_ratio = TRUE) {
 #' below indicates under-coverage (anti-conservative).
 #'
 #' @param cal A \code{data.frame} from \code{\link{et_calibrate}}.
+#' @param group_col Optional character.  Name of a column in \code{cal} that
+#'   identifies sub-groups (e.g.\ \code{"species"}, \code{"cluster_id"}).
+#'   When \code{NULL} (default), \code{et_plot_calibration} uses the
+#'   \code{group} column if present; otherwise it auto-detects any single
+#'   non-canonical column with more than one unique value and treats it as
+#'   the grouping.  Set to \code{NA} to force a single un-grouped series.
 #' @return A \code{ggplot2} object.
 #' @export
-et_plot_calibration <- function(cal) {
-  has_group <- "group" %in% colnames(cal)
+et_plot_calibration <- function(cal, group_col = NULL) {
+  canonical <- c("ci_level", "nominal", "observed_coverage",
+                 "n_obs", "calibration_error", "sharpness")
+
+  if (is.null(group_col)) {
+    if ("group" %in% colnames(cal)) {
+      group_col <- "group"
+    } else {
+      extras <- setdiff(colnames(cal), canonical)
+      extras <- extras[vapply(extras,
+                              function(x) length(unique(cal[[x]])) > 1,
+                              logical(1))]
+      if (length(extras) == 1L) group_col <- extras
+    }
+  } else if (is.na(group_col)) {
+    group_col <- NULL
+  }
+
+  has_group <- !is.null(group_col) && group_col %in% colnames(cal)
 
   p <- ggplot2::ggplot(cal, ggplot2::aes(
     x = .data[["nominal"]],
@@ -137,10 +160,10 @@ et_plot_calibration <- function(cal) {
   if (has_group) {
     p <- p +
       ggplot2::geom_line(ggplot2::aes(
-        color = .data[["group"]], group = .data[["group"]]
+        color = .data[[group_col]], group = .data[[group_col]]
       ), alpha = 0.6) +
-      ggplot2::geom_point(ggplot2::aes(color = .data[["group"]]), size = 3) +
-      ggplot2::scale_color_viridis_d(name = "Group")
+      ggplot2::geom_point(ggplot2::aes(color = .data[[group_col]]), size = 3) +
+      ggplot2::scale_color_viridis_d(name = group_col)
   } else {
     p <- p +
       ggplot2::geom_line(alpha = 0.7) +

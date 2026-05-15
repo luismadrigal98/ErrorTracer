@@ -123,28 +123,28 @@ capped at the number of draws available in the fit).}
 \item{ci_levels}{Numeric vector.  Credible interval levels to compute
 (default \code{c(0.5, 0.8, 0.9, 0.95)}).}
 
-\item{n_perturb}{Integer.  Number of draws used for the environmental
-perturbation step (default \code{min(500, n_draws)}).  Reducing this
-speeds up computation.}
+\item{n_perturb}{Integer.  Number of posterior draws used for the
+environmental perturbation step (default \code{min(500, n_draws)}).
+Reducing this speeds up computation.}
 
-\item{n_env_draws}{Integer.  Number of independent perturbations to average
-\emph{within} each posterior draw before computing the cross-draw variance
-(default \code{1L}).  Increasing this reduces Monte Carlo noise in
-\code{env_var}: variance decreases like \eqn{1/\sqrt{n\_env\_draws}}.  The
-output shape is always \code{[n_perturb x n_obs]} regardless of this setting.
-Inspect \code{v_env_mcse} in the decomposition to assess whether further
-averaging is needed.}
+\item{n_env_draws}{Integer.  Number of independent environmental
+perturbations averaged \emph{per posterior draw} when estimating
+\code{env_var} (default \code{1}).  Increasing this reduces Monte Carlo
+noise on the environmental-variance estimate at the cost of proportional
+computation.  The decomposition always reports a Monte Carlo SE
+(\code{v_env_mcse}) alongside \code{env_var}; it decreases roughly like
+\eqn{1/\sqrt{n\_env\_draws \cdot n\_perturb}}.}
 
 \item{interval_type}{Character.  Which draws to use when computing credible
 intervals:
 \itemize{
   \item \code{"predictive"} (default): draws from \code{posterior_predict},
     which include sigma (residual noise).  Use this when forecasting
-    \strong{individual observations} — e.g. a single population's allele
+    \strong{individual observations} --- e.g. a single population's allele
     frequency, one site's ozone reading on a specific day.
   \item \code{"linpred"}: draws from \code{posterior_linpred}, which
     capture only parameter uncertainty (no sigma).  Use this when
-    forecasting the \strong{mean response} — e.g. the expected ozone
+    forecasting the \strong{mean response} --- e.g. the expected ozone
     across many similar days, or mean delta f across replicate populations.
     These intervals are always narrower; they will under-cover individual
     observations unless sigma is negligible.
@@ -163,7 +163,7 @@ from \strong{environmentally inflated} draws
 into the CI, which is typically what you want for sensitivity analyses
 or whenever the reported interval should cover predictor-measurement
 error.  When \code{FALSE} (default, backward compatible), CIs are based
-on \code{posterior_predict} only — parameter + residual, without
+on \code{posterior_predict} only --- parameter + residual, without
 predictor noise.}
 
 \item{...}{Passed to methods.}
@@ -174,15 +174,20 @@ An \code{et_prediction} object (list) containing:
   \item{\code{posterior_predict}}{Matrix \code{[n_draws x n_obs]}: full
     posterior predictive draws (parameter + residual uncertainty).}
   \item{\code{posterior_linpred}}{Matrix \code{[n_draws x n_obs]}: linear
-    predictor draws (parameter uncertainty only).}
+    predictor draws on the \strong{link scale} (parameter uncertainty only).}
   \item{\code{lp_perturbed}}{Matrix \code{[n_perturb x n_obs]}: linear
-    predictor computed on environmentally perturbed inputs.}
-  \item{\code{sigma_draws}}{Numeric vector: posterior draws of sigma.}
+    predictor on the link scale computed on environmentally perturbed inputs.}
+  \item{\code{sigma_draws}}{Numeric vector: posterior draws of sigma
+    (\code{NA} for families without a sigma parameter, e.g.\ Binomial).}
   \item{\code{credible_intervals}}{data.frame with columns
     \code{row_id, ci_level, lower, median, upper, width}.}
-  \item{\code{decomposition}}{data.frame from
-    \code{decompose_uncertainty()}: \code{param_var, env_var,
-    residual_var, total_var}.}
+  \item{\code{decomposition}}{data.frame with columns
+    \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var}.
+    All components are on the \strong{response scale}.
+    \code{v_env_mcse} is the Monte Carlo SE of \code{env_var}.
+    \code{residual_var} is per-observation for non-Gaussian families
+    (e.g.\ Binomial: \eqn{E_s[\mu^{(s)}(1-\mu^{(s)})]}) and constant
+    for Gaussian.}
   \item{\code{newdata}}{The input \code{newdata}.}
   \item{\code{model}}{Reference to the \code{et_model} used.}
   \item{\code{env_cov}}{The \eqn{p \times p} correlation matrix actually
