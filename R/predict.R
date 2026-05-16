@@ -328,13 +328,15 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   ci_df <- .compute_ci(ci_draws, ci_levels)
 
   # --- 8. Decomposition (all components on response scale) ---
+  has_autocor <- .formula_has_autocor(fit$formula)
   decomp <- .decompose_from_arrays(
     pp           = pp,
     mu_draws     = mu_draws,
     mu_perturbed = mu_perturbed,
     mu_draws_sub = mu_draws_sub,
     family       = fit$family,
-    disp_draws   = disp_draws
+    disp_draws   = disp_draws,
+    has_autocor  = has_autocor
   )
 
   structure(
@@ -582,7 +584,10 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # Core uncertainty decomposition from arrays.
 # All components are computed on the RESPONSE SCALE (g^{-1}(eta)) so that
 # the law of total variance holds: V_total ~ V_param + V_resid (when
-# env_noise = 0), and the three components are dimensionally consistent.
+# env_noise = 0), and the components are dimensionally consistent. When
+# has_autocor = TRUE a fourth temporal_var component absorbs the
+# autocorrelation-induced spread (V_total - (V_param + V_env + V_resid)),
+# clamped at 0 for Monte Carlo robustness.
 #
 # pp           : [n_draws  x n_obs] posterior predictive draws (response scale)
 # mu_draws     : [n_draws  x n_obs] response-scale posterior means
@@ -591,8 +596,11 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # mu_draws_sub : [n_perturb x n_obs] first n_perturb rows of mu_draws
 # family       : brms family object (used to dispatch residual variance)
 # disp_draws   : named list of dispersion parameter draws (sigma, phi, nu, shape)
+# has_autocor  : logical; if TRUE, add a temporal_var component capturing the
+#                AR/MA/ARMA-induced predictive variance beyond the iid sum.
 .decompose_from_arrays <- function(pp, mu_draws, mu_perturbed, mu_draws_sub,
-                                    family, disp_draws) {
+                                    family, disp_draws,
+                                    has_autocor = FALSE) {
   n_obs <- ncol(pp)
   n_p   <- nrow(mu_perturbed)
 
@@ -617,12 +625,17 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   )
 
   # Residual variance: family-specific expected within-draw variance.
+  # For models with an autocor term this is the *innovation* variance
+  # (E[sigma^2] for Gaussian AR(1)); the additional autocorrelation-induced
+  # spread is captured in temporal_var below.
   residual_var <- .family_residual_var(family, mu_draws, disp_draws)
 
   # Total variance: from the posterior predictive (response scale, unchanged).
+  # brms's posterior_predict() forecasts iteratively under AR/MA/ARMA, so
+  # total_var already includes the autocorrelation contribution.
   total_var <- apply(pp, 2, stats::var)
 
-  data.frame(
+  out <- data.frame(
     obs_id       = seq_len(n_obs),
     total_var    = total_var,
     param_var    = param_var,
@@ -631,6 +644,20 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     residual_var = residual_var,
     stringsAsFactors = FALSE
   )
+
+  if (isTRUE(has_autocor)) {
+    # Temporal (autocorrelation-induced) variance: the gap between the
+    # posterior-predictive total and the iid-equivalent sum of the three
+    # named components. For Gaussian AR(p) this corresponds to the
+    # autocorrelated accumulation of innovations beyond a single sigma^2;
+    # for ARMA / MA / cosy() / sar() / car() it absorbs whatever residual
+    # dependence structure brms is modelling. Clamped at 0 to absorb the
+    # small Monte Carlo and posterior-mean approximations in the three
+    # named components.
+    out$temporal_var <- pmax(0, total_var - (param_var + env_var + residual_var))
+  }
+
+  out
 }
 
 # ******************************************************************************
@@ -808,6 +835,9 @@ print.et_prediction <- function(x, ...) {
   cat(sprintf("    Environmental: %.4f  (MC SE: %.4f)\n",
               mean(decomp$env_var), mean(decomp$v_env_mcse)))
   cat(sprintf("    Residual     : %.4f\n", mean(decomp$residual_var, na.rm = TRUE)))
+  if ("temporal_var" %in% colnames(decomp)) {
+    cat(sprintf("    Temporal     : %.4f\n", mean(decomp$temporal_var, na.rm = TRUE)))
+  }
   cat(sprintf("    Total        : %.4f\n", mean(decomp$total_var)))
   invisible(x)
 }

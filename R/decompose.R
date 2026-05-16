@@ -1,9 +1,13 @@
-# R/decompose.R — decompose_uncertainty(): three-way variance decomposition
+# R/decompose.R — decompose_uncertainty(): variance decomposition
+# Reports a three-way split (parameter / environmental / residual) for iid
+# models, and a four-way split adding a temporal-autocorrelation component
+# when the model formula contains an ar() / ma() / arma() / cosy() / unstr()
+# / sar() / car() term.
 
 #' Extract or recompute uncertainty decomposition
 #'
-#' Returns a \code{data.frame} with the three-way uncertainty decomposition
-#' stored inside an \code{et_prediction} object:
+#' Returns a \code{data.frame} with the uncertainty decomposition stored
+#' inside an \code{et_prediction} object:
 #' \describe{
 #'   \item{param_var}{Variance of the posterior linear predictor — captures
 #'     uncertainty in fitted regression coefficients.}
@@ -11,23 +15,35 @@
 #'     prediction uncertainty in the predictor values (estimated via
 #'     perturbation in \code{\link{et_predict}}).  Zero when
 #'     \code{env_noise = NULL}.}
-#'   \item{residual_var}{Posterior mean of \eqn{\sigma^2} — biological
-#'     process noise, unmeasured drivers, and drift. Using the mean (not
-#'     median) ensures \code{param_var + residual_var} \eqn{\approx}{~} \code{total_var}
-#'     by the law of total variance.}
-#'   \item{total_var}{Variance of the full posterior predictive draws
-#'     (parameter + residual; note that \code{env_var} is an additive
-#'     component measured separately from the perturbation step).}
+#'   \item{residual_var}{Posterior mean of \eqn{\sigma^2} (or its
+#'     family-specific analogue) — biological process noise, unmeasured
+#'     drivers, and drift. For autocorrelation models this is the
+#'     \emph{innovation} variance, not the stationary marginal variance;
+#'     the autocorrelated accumulation is reported separately in
+#'     \code{temporal_var}.}
+#'   \item{temporal_var}{(Only present when the model formula contains an
+#'     autocorrelation term such as \code{ar()}, \code{ma()},
+#'     \code{arma()}, \code{cosy()}, \code{unstr()}, \code{sar()}, or
+#'     \code{car()}.) Variance attributable to residual temporal or
+#'     spatial dependence beyond the iid sum of the three named
+#'     components, computed as
+#'     \code{pmax(0, total_var - (param_var + env_var + residual_var))}.}
+#'   \item{total_var}{Variance of the full posterior predictive draws,
+#'     including any autocorrelation structure modelled by brms.}
 #' }
 #'
-#' All variance components are guaranteed non-negative.
+#' All variance components are guaranteed non-negative. When
+#' \code{temporal_var} is present, the four components sum (modulo Monte
+#' Carlo error) to \code{total_var}; when it is absent, the three named
+#' components do.
 #'
 #' @param predictions An \code{et_prediction} object from
 #'   \code{\link{et_predict}}, or an \code{et_prediction_list} (grouped).
 #' @param ... Unused.
 #' @return A \code{data.frame} with columns
-#'   \code{obs_id, param_var, env_var, residual_var, total_var}.
-#'   For grouped predictions, a \code{group} column is prepended.
+#'   \code{obs_id, param_var, env_var, residual_var, total_var}
+#'   (plus \code{temporal_var} for autocorrelation models, and a leading
+#'   \code{group} column for grouped predictions).
 #' @examples
 #' \donttest{
 #' set.seed(1)

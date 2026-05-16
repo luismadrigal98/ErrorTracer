@@ -345,3 +345,37 @@ et_theme <- function(base_size = 12) {
   }
   mat
 }
+
+# Detect whether a brms formula (or fitted brmsfit's formula) carries an
+# autocorrelation term -- ar(), ma(), arma(), cosy(), unstr(), sar(), car().
+# Accepts a formula, brmsformula, mvbrmsformula, or brmsfit. Returns TRUE
+# if any response component carries an autocor structure.
+#
+# Primary path: ask brms::brmsterms() and look at $dpars$mu$ac (covers both
+# inline ar()/ma() syntax and the legacy autocor= slot, since brmsterms()
+# normalises both onto $ac). For mvbrmsformula objects, scan each response.
+# Fallback: regex-scan the deparsed formula for an inline autocor call.
+.formula_has_autocor <- function(formula) {
+  if (is.null(formula)) return(FALSE)
+  if (inherits(formula, "brmsfit")) formula <- formula$formula
+
+  has_ac <- function(bt) {
+    if (is.null(bt)) return(FALSE)
+    if (!is.null(bt$dpars$mu$ac)) return(TRUE)
+    if (!is.null(bt$adforms$ac)) return(TRUE)
+    FALSE
+  }
+
+  ok <- tryCatch({
+    bt <- brms::brmsterms(formula)
+    if (inherits(bt, "mvbrmsterms")) {
+      any(vapply(bt$terms, has_ac, logical(1)))
+    } else {
+      has_ac(bt)
+    }
+  }, error = function(e) NA)
+  if (isTRUE(ok) || isFALSE(ok)) return(ok)
+
+  txt <- paste(deparse(formula), collapse = " ")
+  grepl("\\b(ar|ma|arma|cosy|unstr|sar|car)\\s*\\(", txt)
+}

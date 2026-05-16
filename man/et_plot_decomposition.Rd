@@ -2,7 +2,7 @@
 % Please edit documentation in R/plot.R
 \name{et_plot_decomposition}
 \alias{et_plot_decomposition}
-\title{Plot three-way uncertainty decomposition}
+\title{Plot uncertainty decomposition}
 \usage{
 et_plot_decomposition(decomp, proportional = TRUE, group_col = NULL)
 }
@@ -22,6 +22,7 @@ A \code{ggplot2} object.
 }
 \description{
 Produces a stacked bar chart showing the relative contributions of
-parameter uncertainty, environmental uncertainty, and residual variance
-for each observation.
+parameter, environmental, and residual variance for each observation,
+plus a fourth temporal-autocorrelation component when present in
+\code{decomp} (see \code{\link{decompose_uncertainty}}).
 }

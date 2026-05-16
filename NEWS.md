@@ -24,6 +24,18 @@
   data frame gains a `v_env_mcse` column reporting the chi-squared standard
   error of `env_var`.
 
+* `decompose_uncertainty()` now reports a fourth `temporal_var` component
+  when the model formula contains an autocorrelation term (`ar()`,
+  `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, or `car()`). The
+  component is computed as `pmax(0, total_var - (param_var + env_var +
+  residual_var))` and captures the autocorrelation-induced predictive
+  variance beyond the iid sum, so the four components reconstruct
+  `total_var` modulo Monte Carlo error. `residual_var` for autocor
+  models is interpreted as the innovation variance (not the stationary
+  marginal variance). `et_plot_decomposition()` adds a Temporal segment
+  to the stacked bars automatically when the column is present, and
+  `print.et_prediction()` includes the new row in its summary.
+
 ## Bug fixes
 
 * `et_plot_calibration()` previously only recognised a column literally

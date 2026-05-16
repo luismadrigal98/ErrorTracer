@@ -5,7 +5,7 @@
 **ErrorTracer** provides a complete pipeline for ecological and genomic forecasting with climate or environmental covariates. It bridges the gap between regularized regression and fully Bayesian workflows in three steps:
 
 1. **Extract informed priors** from a fitted regularized or standard model (`glmnet`, `lm`, `glm`, `ranger`) and carry those estimates forward as prior means into a Bayesian model — rather than discarding them.
-2. **Decompose forecast uncertainty** into three independent sources: parameter uncertainty, environmental/covariate measurement uncertainty, and residual process variance.
+2. **Decompose forecast uncertainty** into three independent sources — parameter uncertainty, environmental/covariate measurement uncertainty, and residual process variance — plus a fourth temporal-autocorrelation component whenever the model formula carries an `ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, or `car()` term.
 3. **Quantify forecast shelf life** — the time horizon at which a forecast's credible interval becomes wider than the biologically plausible response range, rendering it uninformative. This concept has no equivalent in any existing R package.
 
 The package is designed for ecological and genomic time-series forecasting in which a regularized (or plain) regression model is refit as a Bayesian model and predictions must be accompanied by a principled uncertainty budget. The API is fully general — response, predictors, and grouping are formula-driven.
@@ -17,7 +17,7 @@ The package is designed for ecological and genomic time-series forecasting in wh
 | Feature | Description |
 |---|---|
 | **Regularized → Bayesian prior pipeline** | `extract_priors()` converts `glmnet`, `lm`, `glm`, or `ranger` coefficients into `brms`-compatible priors |
-| **Three-way uncertainty decomposition** | Partitions forecast variance into parameter / environmental / residual components |
+| **Uncertainty decomposition** | Partitions forecast variance into parameter / environmental / residual components, with a fourth temporal-autocorrelation component added automatically when the model formula contains `ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, or `car()` |
 | **Forecast shelf life** | Quantifies the exact time point at which a forecast becomes uninformative |
 | **Group-level fitting** | One function call fits and predicts across all groups (e.g., SNP clusters, species, sites) |
 | **Calibration assessment** | Observed vs. nominal coverage probability at multiple CI levels |
@@ -188,7 +188,7 @@ The returned `et_prediction` object contains:
 | `lp_perturbed` | `[n_perturb × n_obs]` matrix — linear predictor under environmentally perturbed inputs |
 | `sigma_draws` | Numeric vector of posterior sigma draws |
 | `credible_intervals` | `data.frame` with columns `row_id, ci_level, lower, median, upper, width` |
-| `decomposition` | `data.frame` with `obs_id, param_var, env_var, residual_var, total_var` |
+| `decomposition` | `data.frame` with `obs_id, param_var, env_var, residual_var, total_var` (plus `temporal_var` when the model carries an autocorrelation term) |
 | `newdata` | The input forecast data |
 | `model` | Reference to the source `et_model` |
 
@@ -217,6 +217,8 @@ head(decomp)
 | `total_var` | `Var[posterior_predict]` — full predictive variance |
 
 All components are guaranteed non-negative. Using the posterior mean of σ² (not the median) ensures `param_var + residual_var ≈ total_var` by the law of total variance.
+
+For models whose formula carries an autocorrelation term (`ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, `car()`), `decompose_uncertainty()` adds a fourth column `temporal_var`, defined as `pmax(0, total_var − (param_var + env_var + residual_var))`. It captures the autocorrelation-induced spread that `brms::posterior_predict()` accumulates iteratively beyond a single innovation, and `residual_var` is then to be read as the *innovation* variance rather than the stationary marginal variance. The four components reconstruct `total_var` modulo Monte Carlo error.
 
 ---
 

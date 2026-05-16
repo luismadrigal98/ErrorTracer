@@ -97,6 +97,53 @@ test_that("v_env_mcse is finite and positive when env noise is present", {
   expect_true(all(decomp$v_env_mcse >= 0))
 })
 
+test_that("temporal_var column is absent unless has_autocor = TRUE", {
+  pred   <- .mock_et_prediction()
+  decomp <- decompose_uncertainty(pred)
+  expect_false("temporal_var" %in% colnames(decomp))
+})
+
+test_that("temporal_var captures the autocor gap when has_autocor = TRUE", {
+  # Build a mock where pp has variance much greater than param + env + residual,
+  # mimicking AR-induced predictive variance growth.
+  set.seed(101)
+  n_obs   <- 5
+  n_draws <- 200
+  # Tight linpred (small param), perturbed lp ~ lp (small env), residual sigma ~ 0.3,
+  # but pp inflated by extra AR-style innovation (sd = 0.8) on top of lp.
+  lp   <- matrix(rnorm(n_draws * n_obs, mean = 0.5, sd = 0.05), nrow = n_draws)
+  lp_p <- lp + matrix(rnorm(n_draws * n_obs, sd = 0.01), nrow = n_draws)
+  sigma_draws <- rep(0.3, n_draws)
+  pp <- lp + matrix(rnorm(n_draws * n_obs, sd = sqrt(0.3^2 + 0.8^2)), nrow = n_draws)
+
+  gauss_family <- list(family = "gaussian", link = "identity",
+                       linkinv = identity)
+  disp_draws   <- list(sigma = sigma_draws, phi = NULL,
+                       shape = NULL, nu = NULL)
+
+  d_iid <- ErrorTracer:::.decompose_from_arrays(
+    pp = pp, mu_draws = lp, mu_perturbed = lp_p, mu_draws_sub = lp,
+    family = gauss_family, disp_draws = disp_draws, has_autocor = FALSE)
+  d_ar <- ErrorTracer:::.decompose_from_arrays(
+    pp = pp, mu_draws = lp, mu_perturbed = lp_p, mu_draws_sub = lp,
+    family = gauss_family, disp_draws = disp_draws, has_autocor = TRUE)
+
+  expect_false("temporal_var" %in% colnames(d_iid))
+  expect_true("temporal_var" %in% colnames(d_ar))
+  expect_true(all(d_ar$temporal_var >= 0))
+  # Four components should reconstruct total_var (within Monte Carlo tolerance).
+  recon <- d_ar$param_var + d_ar$env_var + d_ar$residual_var + d_ar$temporal_var
+  expect_true(all(abs(recon - d_ar$total_var) < 0.05 * d_ar$total_var))
+  # And the temporal gap should be substantial relative to residual_var alone.
+  expect_true(mean(d_ar$temporal_var) > mean(d_ar$residual_var))
+})
+
+test_that(".formula_has_autocor detects ar()/ma()/arma() and rejects plain formulas", {
+  expect_false(ErrorTracer:::.formula_has_autocor(y ~ x))
+  expect_true(ErrorTracer:::.formula_has_autocor(y ~ x + ar(time = t, p = 1)))
+  expect_true(ErrorTracer:::.formula_has_autocor(y ~ x + ma(time = t, q = 1)))
+})
+
 test_that("decompose_uncertainty.et_prediction_list returns grouped data.frame", {
   p1 <- .mock_et_prediction(n_obs = 4)
   p2 <- .mock_et_prediction(n_obs = 3)
