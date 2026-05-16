@@ -25,17 +25,23 @@
 #'     autocorrelation term such as \code{ar()}, \code{ma()},
 #'     \code{arma()}, \code{cosy()}, \code{unstr()}, \code{sar()}, or
 #'     \code{car()}.) Variance attributable to residual temporal or
-#'     spatial dependence beyond the iid sum of the three named
-#'     components, computed as
-#'     \code{pmax(0, total_var - (param_var + env_var + residual_var))}.}
+#'     spatial dependence beyond the iid \code{param + residual} sum,
+#'     computed as
+#'     \code{pmax(0, total_var - (param_var + residual_var))}.
+#'     \code{env_var} is deliberately excluded from this gap because it
+#'     is an additive perturbation-based augmentation measured outside
+#'     of \code{posterior_predict}.}
 #'   \item{total_var}{Variance of the full posterior predictive draws,
 #'     including any autocorrelation structure modelled by brms.}
 #' }
 #'
 #' All variance components are guaranteed non-negative. When
-#' \code{temporal_var} is present, the four components sum (modulo Monte
-#' Carlo error) to \code{total_var}; when it is absent, the three named
-#' components do.
+#' \code{temporal_var} is present, \code{param_var + residual_var +
+#' temporal_var} reconstructs \code{total_var} (modulo Monte Carlo error);
+#' when it is absent, \code{param_var + residual_var} does.
+#' \code{env_var} is always additive on top, representing the extra
+#' variance that would be contributed by perturbing predictors with
+#' \code{env_noise}.
 #'
 #' @param predictions An \code{et_prediction} object from
 #'   \code{\link{et_predict}}, or an \code{et_prediction_list} (grouped).

@@ -647,14 +647,16 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 
   if (isTRUE(has_autocor)) {
     # Temporal (autocorrelation-induced) variance: the gap between the
-    # posterior-predictive total and the iid-equivalent sum of the three
-    # named components. For Gaussian AR(p) this corresponds to the
-    # autocorrelated accumulation of innovations beyond a single sigma^2;
-    # for ARMA / MA / cosy() / sar() / car() it absorbs whatever residual
-    # dependence structure brms is modelling. Clamped at 0 to absorb the
-    # small Monte Carlo and posterior-mean approximations in the three
-    # named components.
-    out$temporal_var <- pmax(0, total_var - (param_var + env_var + residual_var))
+    # posterior-predictive total and the iid-equivalent (param + residual)
+    # sum. For Gaussian AR(p) this corresponds to the autocorrelated
+    # accumulation of innovations beyond a single sigma^2; for ARMA /
+    # MA / cosy() / sar() / car() it absorbs whatever residual dependence
+    # structure brms is modelling. env_var is deliberately excluded
+    # because it is an *additive* perturbation-based augmentation
+    # measured outside of posterior_predict (see docs); subtracting it
+    # here would systematically zero out temporal_var. Clamped at 0 to
+    # absorb small Monte Carlo and posterior-mean approximation noise.
+    out$temporal_var <- pmax(0, total_var - (param_var + residual_var))
   }
 
   out

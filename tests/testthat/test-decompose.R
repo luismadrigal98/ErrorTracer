@@ -131,8 +131,10 @@ test_that("temporal_var captures the autocor gap when has_autocor = TRUE", {
   expect_false("temporal_var" %in% colnames(d_iid))
   expect_true("temporal_var" %in% colnames(d_ar))
   expect_true(all(d_ar$temporal_var >= 0))
-  # Four components should reconstruct total_var (within Monte Carlo tolerance).
-  recon <- d_ar$param_var + d_ar$env_var + d_ar$residual_var + d_ar$temporal_var
+  # param + residual + temporal should reconstruct total_var (within MC
+  # tolerance). env_var is excluded because it is an additive perturbation-
+  # based augmentation measured outside of posterior_predict.
+  recon <- d_ar$param_var + d_ar$residual_var + d_ar$temporal_var
   expect_true(all(abs(recon - d_ar$total_var) < 0.05 * d_ar$total_var))
   # And the temporal gap should be substantial relative to residual_var alone.
   expect_true(mean(d_ar$temporal_var) > mean(d_ar$residual_var))
