@@ -1,4 +1,4 @@
-# ErrorTracer (development)
+# ErrorTracer 1.1.0
 
 ## Breaking changes / deprecations
 

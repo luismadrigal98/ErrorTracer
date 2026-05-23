@@ -1,25 +1,42 @@
-This is a resubmission. In response to the CRAN reviewer:
+This is a minor release (1.0.2 -> 1.1.0) adding new functionality and
+one bug fix. No reverse dependencies were detected on CRAN.
 
-* Added method references with DOIs to the DESCRIPTION:
-  Buerkner (2017) <doi:10.18637/jss.v080.i01> for Bayesian regression via
-  Stan, Friedman, Hastie & Tibshirani (2010) <doi:10.18637/jss.v033.i01>
-  for elastic net, Wright & Ziegler (2017) <doi:10.18637/jss.v077.i01>
-  for random forests, and Vehtari, Gelman & Gabry (2017)
-  <doi:10.1007/s11222-016-9696-4> for leave-one-out cross-validation.
-* Replaced \dontrun{} with \donttest{} in all examples that need brms/Stan
-  compilation (et_fit, decompose_uncertainty, shelf_life, et_calibrate);
-  the wrapped examples are self-contained and execute under
-  --run-donttest.
-* Unwrapped the extract_priors() example (runs in <5 sec).
+## Summary of changes
+
+* New: response-scale variance decomposition for non-Gaussian families
+  (Binomial, Poisson, Student-t, Negative-Binomial, Beta, Gamma) via the
+  inverse link. Gaussian identity is numerically unchanged.
+* New: `et_predict()` gains `n_env_draws` for averaging multiple
+  environmental perturbations per posterior draw; the decomposition table
+  gains a `v_env_mcse` column reporting the chi-squared standard error of
+  `env_var`.
+* New: `decompose_uncertainty()` reports a fourth `temporal_var`
+  component when the model formula contains an autocorrelation term
+  (`ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, `car()`).
+  `et_plot_decomposition()` and `print.et_prediction()` surface the new
+  component automatically.
+* New: `shelf_life()` now returns `se_t_star` in the projected-mode
+  horizon attribute (delta-method SE of `t* = (tau - a) / b`).
+* Deprecation: `shelf_life(plausible_range = ...)` is deprecated in
+  favour of `response_scale`. The old argument still works and emits a
+  warning; it will be removed in a future release.
+* Fix: `et_plot_calibration()` now auto-detects the grouping column when
+  it is named something other than `group` (e.g. `cluster_id`, `species`,
+  `regime`). Adds a `group_col` argument for explicit control, including
+  `group_col = NA` to force a single un-grouped series.
 
 ## Test environments
+
 * local Linux install (Ubuntu), R 4.5.3
 * win-builder (devel and release)
 
 ## R CMD check results
-0 errors | 0 warnings | 1 note
 
-* The remaining NOTE flags this as a new submission and the
-  Maintainer field — expected for an initial CRAN submission.
-* `R CMD check --as-cran --run-donttest` executes all \donttest{}
-  examples successfully ([322s/323s] OK).
+0 errors | 0 warnings | 0 notes
+
+`R CMD check --as-cran --run-donttest` executes all \donttest{}
+examples successfully.
+
+## Reverse dependencies
+
+None on CRAN (checked with `revdepcheck::revdep_check()`).
