@@ -14,3 +14,4 @@
 ^\.Rhistory$
 ^\.fuse_hidden.*$
 ^ErrorTracer_.*\.tar\.gz$
+^ErrorTracer\.code-workspace$
