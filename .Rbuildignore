@@ -7,4 +7,10 @@
 ^\.positai$
 ^\.github$
 ^CRAN-SUBMISSION$
-^\.revdep$
+^revdep$
+^\.\.Rcheck$
+^.*\.Rcheck$
+^\.RData$
+^\.Rhistory$
+^\.fuse_hidden.*$
+^ErrorTracer_.*\.tar\.gz$
