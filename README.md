@@ -1,5 +1,7 @@
 # ErrorTracer: Bayesian Error Propagation and Forecast Uncertainty Decomposition
 
+![ErrorTracer logo](images/logo.png)
+
 ## Overview
 
 **ErrorTracer** provides a complete pipeline for ecological and genomic forecasting with climate or environmental covariates. It bridges the gap between regularized regression and fully Bayesian workflows in three steps:
