@@ -1,6 +1,4 @@
-# ErrorTracer: Bayesian Error Propagation and Forecast Uncertainty Decomposition
-
-![ErrorTracer logo](images/logo.png)
+# ErrorTracer: Bayesian Error Propagation and Forecast Uncertainty Decomposition <img src="images/logo.png" align="right" height="139" alt="ErrorTracer logo" />
 
 ## Overview
 
