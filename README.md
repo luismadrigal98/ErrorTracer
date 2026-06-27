@@ -2,7 +2,7 @@
 
 ## Overview
 
-<img src="images/logo.png" align="right" height="139" alt="ErrorTracer logo" />
+<img src="images/logo.png" align="right" height="200" alt="ErrorTracer logo" />
 
 **ErrorTracer** provides a complete pipeline for ecological and genomic forecasting with climate or environmental covariates. It bridges the gap between regularized regression and fully Bayesian workflows in three steps:
 
