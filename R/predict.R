@@ -135,18 +135,19 @@
 #'   The decomposition components and \code{posterior_predict} /
 #'   \code{posterior_linpred} matrices are always computed regardless of this
 #'   setting.
-#' @param include_env_in_ci Logical.  When \code{TRUE} and
-#'   \code{interval_type = "predictive"}, credible intervals are constructed
-#'   from \strong{environmentally inflated} draws
-#'   \eqn{\tilde y = \tilde{\mathrm{lp}} + \varepsilon}, with
-#'   \eqn{\tilde{\mathrm{lp}}} the perturbed linear predictor and
-#'   \eqn{\varepsilon \sim N(0, \sigma^2)} using posterior draws of
-#'   \eqn{\sigma}.  This folds the environmental uncertainty component back
-#'   into the CI, which is typically what you want for sensitivity analyses
-#'   or whenever the reported interval should cover predictor-measurement
-#'   error.  When \code{FALSE} (default, backward compatible), CIs are based
-#'   on \code{posterior_predict} only --- parameter + residual, without
-#'   predictor noise.
+#' @param include_env_in_ci Logical or \code{NULL}.  Controls whether
+#'   environmental (predictor) uncertainty is folded into the credible
+#'   interval when \code{interval_type = "predictive"}.  When \code{TRUE},
+#'   intervals are built from \strong{environmentally inflated} draws in which
+#'   each posterior-predictive residual is re-centred on the env-perturbed
+#'   response-scale mean, \eqn{\tilde y = \tilde\mu + (y^{pp} - \mu)}
+#'   (family-general; for Gaussian identity this equals
+#'   \eqn{\tilde{\mathrm{lp}} + \varepsilon}, \eqn{\varepsilon\sim N(0,\sigma^2)}).
+#'   The interval variance is then param + env + residual, coherent with the
+#'   env-inclusive \code{total_var}.  The default \code{NULL} means
+#'   \strong{auto}: env is folded in whenever the caller supplied non-zero
+#'   \code{env_noise}, and omitted otherwise.  Pass \code{FALSE} to force a
+#'   parameter + residual interval even when \code{env_noise} is given.
 #' @param ... Passed to methods.
 #'
 #' @return An \code{et_prediction} object (list) containing:
@@ -185,7 +186,7 @@ et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
                         n_perturb = NULL,
                         n_env_draws = 1L,
                         interval_type = c("predictive", "linpred"),
-                        include_env_in_ci = FALSE, ...) {
+                        include_env_in_ci = NULL, ...) {
   UseMethod("et_predict")
 }
 
@@ -202,7 +203,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   n_perturb = NULL,
                                   n_env_draws = 1L,
                                   interval_type = c("predictive", "linpred"),
-                                  include_env_in_ci = FALSE,
+                                  include_env_in_ci = NULL,
                                   ...) {
 
   interval_type <- match.arg(interval_type)
@@ -289,6 +290,14 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   all_zero_noise <- all(vapply(noise_sds,
                                function(v) all(v == 0, na.rm = TRUE),
                                logical(1)))
+
+  # Resolve the auto (NULL) default for include_env_in_ci: fold environmental
+  # uncertainty into the interval whenever the user supplied non-zero
+  # env_noise. This keeps the reported forecast interval (and hence shelf life
+  # + calibration coverage) coherent with the env-inclusive total_var. Users
+  # can still force it on/off explicitly with TRUE/FALSE.
+  if (is.null(include_env_in_ci)) include_env_in_ci <- !all_zero_noise
+
   lp_perturbed <- if (all_zero_noise) {
     lp[seq_len(n_perturb), , drop = FALSE]
   } else {
@@ -314,11 +323,12 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # --- 7. Credible intervals ---
   # Route to posterior_predict (includes sigma) or posterior_linpred (no sigma)
   # depending on interval_type. When include_env_in_ci = TRUE and interval_type
-  # is predictive, rebuild predictive draws as lp_perturbed + sigma * N(0,1)
-  # so predictor noise is folded back into the credible interval.
+  # is predictive, re-centre each posterior-predictive residual on the
+  # env-perturbed mean so predictor noise is folded into the interval
+  # (family-general; see .inflate_env_predictive).
   ci_draws <- if (interval_type == "predictive") {
     if (isTRUE(include_env_in_ci) && !all_zero_noise) {
-      .inflate_env_predictive(lp_perturbed, sigma_draws)
+      .inflate_env_predictive(mu_perturbed, pp, mu_draws)
     } else {
       pp
     }
@@ -373,7 +383,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       n_perturb = NULL,
                                       n_env_draws = 1L,
                                       interval_type = c("predictive", "linpred"),
-                                      include_env_in_ci = FALSE,
+                                      include_env_in_ci = NULL,
                                       ...) {
   interval_type <- match.arg(interval_type)
 
@@ -544,15 +554,26 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   lp_mat
 }
 
-# Fold environmental noise into the predictive draws by adding fresh
-# residual noise on top of the perturbed linear predictor.
-.inflate_env_predictive <- function(lp_perturbed, sigma_draws) {
-  n_p  <- nrow(lp_perturbed)
-  n_o  <- ncol(lp_perturbed)
-  s    <- sigma_draws[seq_len(n_p)]
-  s[is.na(s)] <- 0
-  eps  <- matrix(stats::rnorm(n_p * n_o, sd = rep(s, n_o)), nrow = n_p)
-  lp_perturbed + eps
+# Fold environmental (predictor) uncertainty into the predictive draws by
+# re-centring each posterior-predictive residual on the env-perturbed mean.
+# Family-general: for draw s and observation i,
+#   y_env^(s) = mu_perturbed^(s) + (pp^(s) - mu^(s))
+# where (pp - mu) is the family residual implied by the UNPERTURBED posterior
+# predictive (pp) and its response-scale mean (mu = mu_draws). This works for
+# any brms family without a family-specific sampler: for Gaussian identity it
+# reduces to mu_perturbed + sigma * N(0,1). The result has variance
+# Var(mu_perturbed) + Var(residual) = param + env + residual, matching the
+# variance decomposition, so the interval and total_var tell a consistent
+# story. All arguments are on the RESPONSE scale.
+#
+# mu_perturbed : [n_perturb x n_obs] env-perturbed response-scale means
+# pp           : [n_draws  x n_obs] unperturbed posterior predictive draws
+# mu_draws     : [n_draws  x n_obs] unperturbed response-scale means
+.inflate_env_predictive <- function(mu_perturbed, pp, mu_draws) {
+  n_p   <- nrow(mu_perturbed)
+  resid <- pp[seq_len(n_p), , drop = FALSE] -
+           mu_draws[seq_len(n_p), , drop = FALSE]
+  mu_perturbed + resid
 }
 
 # Build credible interval data.frame from posterior predictive matrix.
@@ -582,12 +603,16 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 }
 
 # Core uncertainty decomposition from arrays.
-# All components are computed on the RESPONSE SCALE (g^{-1}(eta)) so that
-# the law of total variance holds: V_total ~ V_param + V_resid (when
-# env_noise = 0), and the components are dimensionally consistent. When
-# has_autocor = TRUE a fourth temporal_var component absorbs the
-# autocorrelation-induced spread (V_total - (V_param + V_env + V_resid)),
-# clamped at 0 for Monte Carlo robustness.
+# All components are computed on the RESPONSE SCALE (g^{-1}(eta)) so that the
+# law of total variance holds and the components are dimensionally consistent.
+# total_var is DEFINED as the sum of its components, so the budget reconciles
+# exactly and the percentage shares sum to 100%:
+#   iid       : V_total = V_param + V_env + V_resid
+#   has_autocor: V_total = V_param + V_env + V_resid + V_temporal
+# V_env (perturbed predictors) and V_temporal (AR/MA/ARMA accumulation, the
+# excess of the sampled posterior-predictive variance over V_param + V_resid)
+# are therefore genuine sub-shares of a total that contains them, not
+# quantities bolted on top of an env-free total.
 #
 # pp           : [n_draws  x n_obs] posterior predictive draws (response scale)
 # mu_draws     : [n_draws  x n_obs] response-scale posterior means
@@ -630,10 +655,36 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   # spread is captured in temporal_var below.
   residual_var <- .family_residual_var(family, mu_draws, disp_draws)
 
-  # Total variance: from the posterior predictive (response scale, unchanged).
-  # brms's posterior_predict() forecasts iteratively under AR/MA/ARMA, so
-  # total_var already includes the autocorrelation contribution.
-  total_var <- apply(pp, 2, stats::var)
+  # Sampled posterior-predictive variance on the UNPERTURBED predictors.
+  # By the law of total variance this equals param_var + residual_var for iid
+  # models (up to Monte Carlo error) and additionally contains the AR/MA/ARMA
+  # accumulation for autocorrelation models (brms forecasts iteratively). It
+  # does NOT contain env_var, which arises only from perturbing the predictors.
+  pp_var <- apply(pp, 2, stats::var)
+
+  if (isTRUE(has_autocor)) {
+    # Temporal (autocorrelation-induced) variance: the excess of the sampled
+    # posterior-predictive variance over the iid-equivalent (param + residual)
+    # sum. For Gaussian AR(p) this is the autocorrelated accumulation of
+    # innovations beyond a single sigma^2; for ARMA / MA / cosy() / sar() /
+    # car() it absorbs whatever residual dependence structure brms is
+    # modelling — the part the analytic single-innovation residual_var cannot.
+    # Clamped at 0 to absorb small Monte Carlo noise. env is excluded from
+    # this gap because pp uses unperturbed predictors (so env is not in pp_var
+    # and must not be double-subtracted); it re-enters total_var below.
+    temporal_var <- pmax(0, pp_var - (param_var + residual_var))
+    # Total variance now CONTAINS every component. env enters through the
+    # perturbed predictors, temporal through the AR accumulation. Defining
+    # total as the component sum makes the budget reconcile EXACTLY (law of
+    # total variance), so the reported percentage shares sum to 100%.
+    total_var <- param_var + env_var + residual_var + temporal_var
+  } else {
+    temporal_var <- NULL
+    # iid: total variance is the exact law-of-total-variance sum. Using the
+    # analytic sum (rather than the noisier sampled pp variance) guarantees
+    # param + env + residual == total exactly.
+    total_var <- param_var + env_var + residual_var
+  }
 
   out <- data.frame(
     obs_id       = seq_len(n_obs),
@@ -644,20 +695,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     residual_var = residual_var,
     stringsAsFactors = FALSE
   )
-
-  if (isTRUE(has_autocor)) {
-    # Temporal (autocorrelation-induced) variance: the gap between the
-    # posterior-predictive total and the iid-equivalent (param + residual)
-    # sum. For Gaussian AR(p) this corresponds to the autocorrelated
-    # accumulation of innovations beyond a single sigma^2; for ARMA /
-    # MA / cosy() / sar() / car() it absorbs whatever residual dependence
-    # structure brms is modelling. env_var is deliberately excluded
-    # because it is an *additive* perturbation-based augmentation
-    # measured outside of posterior_predict (see docs); subtracting it
-    # here would systematically zero out temporal_var. Clamped at 0 to
-    # absorb small Monte Carlo and posterior-mean approximation noise.
-    out$temporal_var <- pmax(0, total_var - (param_var + residual_var))
-  }
+  if (!is.null(temporal_var)) out$temporal_var <- temporal_var
 
   out
 }

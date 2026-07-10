@@ -70,9 +70,10 @@
 #'       for absolute-grid rows.}
 #'     \item{\code{param_var, env_var, residual_var, total_var}}{Mean across
 #'       forecast observations.}
-#'     \item{\code{env_share}}{\code{env_var / (env_var + total_var)} ---
-#'       the fraction of combined predictive variance attributable to
-#'       predictor noise (bounded in \eqn{[0, 1]}).}
+#'     \item{\code{env_share}}{\code{env_var / total_var} --- the fraction
+#'       of total predictive variance attributable to predictor noise.
+#'       Because \code{total_var} now contains \code{env_var} as a sub-share
+#'       (law of total variance), this is bounded in \eqn{[0, 1]}.}
 #'     \item{\code{ci_width_mean, ci_width_max}}{At \code{ci_level}.}
 #'     \item{\code{ratio_mean, ratio_max}}{CI width / plausible range.}
 #'     \item{\code{horizon_type}}{One of \code{"observed"}, \code{"projected"},
@@ -166,8 +167,7 @@ et_sensitivity_profile <- function(model,
       residual_var        = mean(pred$decomposition$residual_var),
       total_var           = mean(pred$decomposition$total_var),
       env_share           = mean(pred$decomposition$env_var /
-                                   pmax(pred$decomposition$env_var +
-                                        pred$decomposition$total_var, 1e-12)),
+                                   pmax(pred$decomposition$total_var, 1e-12)),
       ci_width_mean       = mean(sl$ci_width),
       ci_width_max        = max(sl$ci_width),
       ratio_mean          = mean(sl$ratio),

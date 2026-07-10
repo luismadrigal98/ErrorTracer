@@ -11,10 +11,10 @@
 #' \describe{
 #'   \item{param_var}{Variance of the posterior linear predictor — captures
 #'     uncertainty in fitted regression coefficients.}
-#'   \item{env_var}{Additional variance arising from measurement or
-#'     prediction uncertainty in the predictor values (estimated via
-#'     perturbation in \code{\link{et_predict}}).  Zero when
-#'     \code{env_noise = NULL}.}
+#'   \item{env_var}{Variance arising from measurement or prediction
+#'     uncertainty in the predictor values (estimated via perturbation in
+#'     \code{\link{et_predict}}).  A genuine sub-share of \code{total_var}
+#'     (see below), not an add-on. Zero when \code{env_noise = NULL}.}
 #'   \item{residual_var}{Posterior mean of \eqn{\sigma^2} (or its
 #'     family-specific analogue) — biological process noise, unmeasured
 #'     drivers, and drift. For autocorrelation models this is the
@@ -26,22 +26,23 @@
 #'     \code{arma()}, \code{cosy()}, \code{unstr()}, \code{sar()}, or
 #'     \code{car()}.) Variance attributable to residual temporal or
 #'     spatial dependence beyond the iid \code{param + residual} sum,
-#'     computed as
-#'     \code{pmax(0, total_var - (param_var + residual_var))}.
-#'     \code{env_var} is deliberately excluded from this gap because it
-#'     is an additive perturbation-based augmentation measured outside
-#'     of \code{posterior_predict}.}
-#'   \item{total_var}{Variance of the full posterior predictive draws,
-#'     including any autocorrelation structure modelled by brms.}
+#'     computed as the excess of the sampled posterior-predictive variance
+#'     over \code{param_var + residual_var}, i.e.
+#'     \code{pmax(0, var(posterior_predict) - (param_var + residual_var))}.
+#'     This captures the AR/MA/ARMA innovation accumulation that the analytic
+#'     single-innovation \code{residual_var} does not.}
+#'   \item{total_var}{Total predictive variance, \emph{defined as the sum of
+#'     its components} so the budget reconciles exactly (law of total
+#'     variance): \code{param_var + env_var + residual_var} for iid models,
+#'     plus \code{temporal_var} for autocorrelation models. \code{env_var}
+#'     thus enters \code{total_var} through the perturbed predictors, rather
+#'     than being added on top of an env-free total.}
 #' }
 #'
-#' All variance components are guaranteed non-negative. When
-#' \code{temporal_var} is present, \code{param_var + residual_var +
-#' temporal_var} reconstructs \code{total_var} (modulo Monte Carlo error);
-#' when it is absent, \code{param_var + residual_var} does.
-#' \code{env_var} is always additive on top, representing the extra
-#' variance that would be contributed by perturbing predictors with
-#' \code{env_noise}.
+#' All variance components are guaranteed non-negative, and because
+#' \code{total_var} is the sum of the other components the reported
+#' percentage shares sum to 100\% exactly (\code{param_var + env_var +
+#' residual_var (+ temporal_var) == total_var}).
 #'
 #' @param predictions An \code{et_prediction} object from
 #'   \code{\link{et_predict}}, or an \code{et_prediction_list} (grouped).
