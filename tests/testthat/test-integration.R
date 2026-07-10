@@ -157,6 +157,41 @@ test_that("et_calibrate print method runs without error", {
   expect_output(print(cal), "calibration")
 })
 
+# ── AR forecast accumulation (T3) ────────────────────────────────────────────
+
+test_that("AR(1) forecast variance accumulates with lead time", {
+  # brms accumulates AR variance across a horizon only when the forecast rows
+  # continue the training series with response = NA (see
+  # .posterior_predict_forecast). This guards against the flat-CI regression
+  # the reviewer flagged (L335).
+  set.seed(7L)
+  nn <- 50L; ph <- 0.85
+  ee <- numeric(nn); ee[1] <- rnorm(1)
+  for (tt in 2:nn) ee[tt] <- ph * ee[tt - 1] + rnorm(1)
+  xx <- rnorm(nn)
+  ar_df <- data.frame(t = seq_len(nn), x = xx, y = 1 + 0.5 * xx + ee)
+  tr <- ar_df[1:35, ]; fu <- ar_df[36:50, ]
+
+  ar_fit <- suppressWarnings(et_fit(
+    y ~ x + ar(time = t, p = 1), data = tr,
+    chains = 1L, iter = 600L, warmup = 300L, cores = 1L, seed = 7L, refresh = 0L
+  ))
+  pr <- suppressWarnings(et_predict(ar_fit, newdata = fu, n_draws = 300L))
+  d  <- decompose_uncertainty(pr)
+  H  <- nrow(fu)
+
+  expect_true("temporal_var" %in% colnames(d))
+  # Total predictive variance grows substantially from lead 1 to lead H
+  expect_gt(d$total_var[H], 1.5 * d$total_var[1])
+  # So does the reported 95% CI width
+  w95 <- pr$credible_intervals
+  w95 <- w95$width[w95$ci_level == 0.95]
+  expect_gt(w95[H], 1.3 * w95[1])
+  # The 4-way budget still reconciles exactly
+  recon <- d$param_var + d$env_var + d$residual_var + d$temporal_var
+  expect_equal(recon, d$total_var, tolerance = 1e-8)
+})
+
 # ── et_fit with lm prior (default method path) ───────────────────────────────
 
 test_that("et_fit works with flat (NULL) priors", {

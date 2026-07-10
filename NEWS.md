@@ -30,6 +30,28 @@ with the uncertainty-budget consistency of the decomposition.
   `env_var / total_var` (previously `env_var / (env_var + total_var)`), which
   double-counted env once env entered the total.
 
+## Bug fixes
+
+* **AR/MA forecast variance now accumulates with lead time (T3).** For
+  autocorrelation models (`ar()`/`ma()`/`arma()`/`cosy()`/`unstr()`/`sar()`/
+  `car()`), `et_predict()` previously called `posterior_predict()` on the
+  forecast rows alone, which does **not** propagate the residual
+  autocorrelation across the horizon — the predictive variance (and hence the
+  credible interval, `temporal_var`, and shelf life) stayed flat with lead
+  time. `et_predict()` now continues the training series with the forecast
+  rows (response blanked to `NA`) so brms iterates the fitted process forward:
+  the forecast variance grows with lead time, integrates over the posterior of
+  the AR coefficient (draws with |φ| ≥ 1 contribute super-linear growth,
+  correctly handling the non-stationary / random-walk regime), and carries the
+  initial-condition uncertainty from the forecast origin. The forecast rows'
+  responses are always treated as unknown, so passing a hindcast's observed
+  future values no longer leaks them into the interval.
+
+* `et_predict()` caps `n_draws` at the number of draws in the fit (with a
+  warning) instead of erroring, and now uses a shared, explicit set of draw
+  ids across `posterior_predict()` and `posterior_linpred()` so the two are
+  aligned draw-for-draw.
+
 # ErrorTracer 1.1.0
 
 ## Breaking changes / deprecations
