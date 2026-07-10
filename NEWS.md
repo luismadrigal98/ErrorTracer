@@ -30,6 +30,20 @@ with the uncertainty-budget consistency of the decomposition.
   `env_var / total_var` (previously `env_var / (env_var + total_var)`), which
   double-counted env once env entered the total.
 
+* **`extract_priors()` gains a `shrinkage` argument, defaulting to `"zero"`
+  (T5).** This addresses the prior/likelihood double-use objection at its
+  source. The previous behaviour — using the fitted coefficients as prior
+  *means* and then refitting the Bayesian model on the same data — reused the
+  data twice and could make posteriors overconfident. The new default centres
+  every coefficient prior at 0 (a regularizing, ridge-style prior) with a width
+  scaled by the coefficient *magnitude* `multiplier * |coef|` (floored at
+  `min_sd`), so a well-estimated large coefficient is not shrunk toward 0 while
+  its estimated *location* is no longer reused. Set `shrinkage = "estimate"` to
+  recover the previous informative-mean behaviour (with a documented double-use
+  caveat). For `ranger` the prior mean is always 0, so `shrinkage` has no
+  effect there. The `et_prior_spec` object and its `print()` method now report
+  the shrinkage mode.
+
 ## Bug fixes
 
 * **AR/MA forecast variance now accumulates with lead time (T3).** For

@@ -8,10 +8,26 @@
 #' Extract brms prior specification from a regularized or standard regression model
 #'
 #' Converts a fitted model object into a \code{brms} prior specification
-#' suitable for \code{\link{et_fit}}.  The coefficient estimates (or
-#' importance weights for \pkg{ranger}) from the regularized or standard fit are used as
-#' informative prior means, so the Bayesian model starts close to the
-#' regularized or standard solution while remaining open to data-driven revision.
+#' suitable for \code{\link{et_fit}}.  The regularized or standard fit sets the
+#' \emph{scale} of each coefficient's prior (its SD); the \code{shrinkage}
+#' argument controls the prior \emph{mean}.  With the default
+#' \code{shrinkage = "zero"} the priors are centred at zero --- a regularizing
+#' (ridge-style) prior whose width is informed by the fit but whose location
+#' carries no reused point estimate.  With \code{shrinkage = "estimate"} the
+#' coefficient estimates are used as informative prior means, so the Bayesian
+#' model starts close to the regularized solution.
+#'
+#' @section Prior/likelihood double use:
+#' Centring the priors on the coefficient \emph{estimates}
+#' (\code{shrinkage = "estimate"}) and then refitting the Bayesian model on the
+#' \emph{same} data uses those data twice --- once to locate the prior mean and
+#' once through the likelihood --- which can make posteriors overconfident,
+#' especially at small \eqn{n}.  The default \code{shrinkage = "zero"} avoids
+#' this by not reusing the estimated location: only the prior scale is
+#' data-informed, which is a standard weakly-informative device.  If you use
+#' \code{shrinkage = "estimate"}, check calibration with
+#' \code{\link{et_calibrate}}, or build the priors on data held out from the
+#' likelihood fit.
 #'
 #' @param model A fitted model.  Supported classes:
 #'   \itemize{
@@ -25,6 +41,12 @@
 #'   \code{multiplier * importance_normalised} (for ranger).  Default 2.0.
 #' @param min_sd Numeric scalar.  Minimum prior SD to avoid degenerate
 #'   (spike) priors on near-zero coefficients.  Default 0.1.
+#' @param shrinkage Character.  Sets the prior \emph{mean}: \code{"zero"}
+#'   (default) centres every coefficient prior at 0 (a regularizing prior with
+#'   a data-informed scale but no reused location); \code{"estimate"} uses the
+#'   fitted coefficient as the prior mean (informative, but reuses the data ---
+#'   see the double-use note above).  For \code{ranger} the mean is always 0
+#'   (no signed coefficients), so \code{shrinkage} has no effect.
 #' @param intercept_prior_sd Optional prior SD for the intercept term.  The
 #'   default \code{NULL} emits \emph{no} explicit intercept prior and lets
 #'   \code{brms} pick its data-aware default
@@ -54,6 +76,7 @@
 #' print(ps)
 #' @export
 extract_priors <- function(model, multiplier = 2.0, min_sd = 0.1,
+                           shrinkage = c("zero", "estimate"),
                            intercept_prior_sd = NULL, sigma_prior_scale = 1.0,
                            ...) {
   UseMethod("extract_priors")
@@ -66,8 +89,10 @@ extract_priors <- function(model, multiplier = 2.0, min_sd = 0.1,
 #' @rdname extract_priors
 #' @export
 extract_priors.lm <- function(model, multiplier = 2.0, min_sd = 0.1,
+                               shrinkage = c("zero", "estimate"),
                                intercept_prior_sd = NULL, sigma_prior_scale = 1.0,
                                ...) {
+  shrinkage <- match.arg(shrinkage)
   coef_summary <- summary(model)$coefficients
   # Drop the intercept row — handled separately
   coef_rows <- coef_summary[rownames(coef_summary) != "(Intercept)", , drop = FALSE]
@@ -86,6 +111,7 @@ extract_priors.lm <- function(model, multiplier = 2.0, min_sd = 0.1,
     method = "lm",
     multiplier = multiplier,
     min_sd = min_sd,
+    shrinkage = shrinkage,
     intercept_prior_sd = intercept_prior_sd,
     sigma_prior_scale = sigma_prior_scale
   )
@@ -98,8 +124,10 @@ extract_priors.lm <- function(model, multiplier = 2.0, min_sd = 0.1,
 #' @rdname extract_priors
 #' @export
 extract_priors.glm <- function(model, multiplier = 2.0, min_sd = 0.1,
+                                shrinkage = c("zero", "estimate"),
                                 intercept_prior_sd = NULL, sigma_prior_scale = 1.0,
                                 ...) {
+  shrinkage <- match.arg(shrinkage)
   coef_summary <- summary(model)$coefficients
   coef_rows <- coef_summary[rownames(coef_summary) != "(Intercept)", , drop = FALSE]
 
@@ -117,6 +145,7 @@ extract_priors.glm <- function(model, multiplier = 2.0, min_sd = 0.1,
     method = "glm",
     multiplier = multiplier,
     min_sd = min_sd,
+    shrinkage = shrinkage,
     intercept_prior_sd = intercept_prior_sd,
     sigma_prior_scale = sigma_prior_scale
   )
@@ -132,9 +161,11 @@ extract_priors.glm <- function(model, multiplier = 2.0, min_sd = 0.1,
 #'   \code{"lambda.1se"}.
 #' @export
 extract_priors.cv.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
+                                      shrinkage = c("zero", "estimate"),
                                       intercept_prior_sd = NULL,
                                       sigma_prior_scale = 1.0,
                                       lambda = "lambda.min", ...) {
+  shrinkage <- match.arg(shrinkage)
   if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("Package 'glmnet' is required for extract_priors.cv.glmnet().")
   }
@@ -144,6 +175,7 @@ extract_priors.cv.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
     coef_mat  = coef_mat,
     multiplier = multiplier,
     min_sd = min_sd,
+    shrinkage = shrinkage,
     intercept_prior_sd = intercept_prior_sd,
     sigma_prior_scale = sigma_prior_scale
   )
@@ -159,9 +191,11 @@ extract_priors.cv.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
 #'   (smallest regularisation).
 #' @export
 extract_priors.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
+                                   shrinkage = c("zero", "estimate"),
                                    intercept_prior_sd = NULL,
                                    sigma_prior_scale = 1.0,
                                    s = 1L, ...) {
+  shrinkage <- match.arg(shrinkage)
   if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("Package 'glmnet' is required for extract_priors.glmnet().")
   }
@@ -175,6 +209,7 @@ extract_priors.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
     coef_mat = coef_mat,
     multiplier = multiplier,
     min_sd = min_sd,
+    shrinkage = shrinkage,
     intercept_prior_sd = intercept_prior_sd,
     sigma_prior_scale  = sigma_prior_scale
   )
@@ -193,8 +228,10 @@ extract_priors.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
 #' positive permutation importance are included.
 #' @export
 extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
+                                   shrinkage = c("zero", "estimate"),
                                    intercept_prior_sd = NULL,
                                    sigma_prior_scale = 1.0, ...) {
+  shrinkage <- match.arg(shrinkage)  # ranger priors are always mean-0
   if (!requireNamespace("ranger", quietly = TRUE)) {
     stop("Package 'ranger' is required for extract_priors.ranger().")
   }
@@ -223,6 +260,7 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
     method = "ranger",
     multiplier = multiplier,
     min_sd = min_sd,
+    shrinkage = shrinkage,
     intercept_prior_sd = intercept_prior_sd,
     sigma_prior_scale = sigma_prior_scale
   )
@@ -234,6 +272,7 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
 
 # Shared code for cv.glmnet and glmnet coefficient extraction
 .extract_glmnet_coefs <- function(coef_mat, multiplier, min_sd,
+                                   shrinkage = "zero",
                                    intercept_prior_sd, sigma_prior_scale) {
   # coef_mat is a dgCMatrix with rows = (Intercept, pred1, pred2, ...)
   coef_vec <- as.numeric(coef_mat)
@@ -260,6 +299,7 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
     method = "glmnet",
     multiplier = multiplier,
     min_sd = min_sd,
+    shrinkage = shrinkage,
     intercept_prior_sd = intercept_prior_sd,
     sigma_prior_scale = sigma_prior_scale
   )
@@ -268,8 +308,25 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
 # Assemble a brms prior list and return an et_prior_spec object
 .build_prior_spec <- function(pred_names, prior_means, prior_sds, coefs,
                                method, multiplier, min_sd,
+                               shrinkage = "zero",
                                intercept_prior_sd, sigma_prior_scale) {
   if (length(pred_names) == 0) stop("No predictors to build priors for.")
+
+  # shrinkage = "zero" centres every coefficient prior at 0 (regularizing
+  # prior; the estimated location is not reused -> no prior/likelihood double
+  # use on the mean). Crucially the mean-0 prior is scaled by the coefficient
+  # MAGNITUDE |beta_hat| (ridge-style), NOT by the standard error: an SE-based
+  # width would make a well-estimated large coefficient's prior tight around 0
+  # and wrongly shrink it toward 0. Methods without signed coefficients
+  # (ranger, coefs = NULL) keep their supplied importance-based SD.
+  # shrinkage = "estimate" keeps the fitted coefficients as the prior means and
+  # each method's native SD (SE-based for lm/glm, |coef|-based for glmnet).
+  if (identical(shrinkage, "zero")) {
+    prior_means <- rep(0, length(pred_names))
+    if (!is.null(coefs)) {
+      prior_sds <- pmax(multiplier * abs(as.numeric(coefs)), min_sd)
+    }
+  }
 
   prior_list <- vector("list", length(pred_names))
   for (j in seq_along(pred_names)) {
@@ -308,6 +365,7 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
       method = method,
       multiplier = multiplier,
       min_sd = min_sd,
+      shrinkage = shrinkage,
       intercept_prior_sd = intercept_prior_sd,
       sigma_prior_scale = sigma_prior_scale
     ),
@@ -321,18 +379,24 @@ extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
 
 #' @export
 print.et_prior_spec <- function(x, ...) {
+  shrinkage <- x$shrinkage %||% "estimate"
   cat("ErrorTracer prior specification\n")
   cat("  Method      :", x$method, "\n")
   cat("  Predictors  :", length(x$pred_names), "\n")
   cat("  Multiplier  :", x$multiplier, "\n")
   cat("  Min SD      :", x$min_sd, "\n")
+  cat("  Shrinkage   :", shrinkage,
+      if (identical(shrinkage, "zero")) "(prior means at 0; regularizing)"
+      else "(prior means = coefficient estimates)", "\n")
   if (!is.null(x$coefs)) {
     cat("  Coefficients:\n")
     for (j in seq_along(x$pred_names)) {
-      cat(sprintf("    %-20s  mean = %8.4f  sd = %8.4f\n",
+      prior_mean <- if (identical(shrinkage, "zero")) 0 else x$coefs[j]
+      cat(sprintf("    %-20s  prior mean = %8.4f  sd = %8.4f  (coef = %8.4f)\n",
                   x$pred_names[j],
-                  x$coefs[j],
-                  max(x$multiplier * abs(x$coefs[j]), x$min_sd)))
+                  prior_mean,
+                  max(x$multiplier * abs(x$coefs[j]), x$min_sd),
+                  x$coefs[j]))
     }
   } else {
     cat("  Predictors  :", paste(x$pred_names, collapse = ", "), "\n")

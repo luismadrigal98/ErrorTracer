@@ -59,6 +59,69 @@ test_that("extract_priors.lm print method runs without error", {
   expect_output(print(ps), "lm")
 })
 
+# ── shrinkage knob (T5) ──────────────────────────────────────────────────────
+
+# Helper: parse the mean out of each "normal(mean, sd)" coefficient prior
+.prior_means_of <- function(ps) {
+  pdf <- as.data.frame(ps$prior)
+  b   <- pdf[pdf$class == "b" & pdf$coef != "", ]
+  stats::setNames(as.numeric(sub("normal\\(\\s*([^,]+),.*", "\\1", b$prior)),
+                  b$coef)
+}
+
+test_that("shrinkage defaults to 'zero' → regularizing priors centred at 0", {
+  set.seed(11)
+  df <- data.frame(x1 = rnorm(60), x2 = rnorm(60))
+  df$y <- 1 + 2 * df$x1 - 1.5 * df$x2 + rnorm(60, sd = 0.5)
+  fit <- lm(y ~ x1 + x2, data = df)
+
+  ps0 <- extract_priors(fit)                      # default
+  expect_equal(ps0$shrinkage, "zero")
+  m0 <- .prior_means_of(ps0)
+  expect_true(all(abs(m0) < 1e-9))                # all prior means are 0
+  # the coefficient estimates are still recorded for reporting
+  expect_named(ps0$coefs, ps0$pred_names)
+  expect_true(any(abs(ps0$coefs) > 0.1))
+})
+
+test_that("shrinkage='estimate' reuses coefficient estimates as prior means", {
+  set.seed(11)
+  df <- data.frame(x1 = rnorm(60), x2 = rnorm(60))
+  df$y <- 1 + 2 * df$x1 - 1.5 * df$x2 + rnorm(60, sd = 0.5)
+  fit <- lm(y ~ x1 + x2, data = df)
+
+  ps <- extract_priors(fit, shrinkage = "estimate")
+  expect_equal(ps$shrinkage, "estimate")
+  m <- .prior_means_of(ps)
+  expect_equal(unname(m[names(ps$coefs)]),
+               unname(round(ps$coefs, 6)), tolerance = 1e-5)
+})
+
+test_that("shrinkage='zero' uses a ridge-style |coef|-scaled SD, not the SE", {
+  # A well-estimated large coefficient must get a WIDE mean-0 prior so it is
+  # not crushed toward 0. The SD is multiplier * |coef| (floored at min_sd),
+  # not multiplier * SE (which would be tight for a precise estimate).
+  set.seed(12)
+  df <- data.frame(x1 = rnorm(60), x2 = rnorm(60))
+  df$y <- 1 + 3 * df$x1 - 1.5 * df$x2 + rnorm(60, sd = 0.4)
+  fit <- lm(y ~ x1 + x2, data = df)
+
+  sd_of <- function(ps) {
+    pdf <- as.data.frame(ps$prior)
+    b   <- pdf[pdf$class == "b" & pdf$coef != "", ]
+    stats::setNames(as.numeric(sub("normal\\([^,]+,\\s*([0-9.]+)\\)", "\\1", b$prior)),
+                    b$coef)
+  }
+  ps0  <- extract_priors(fit, multiplier = 2, min_sd = 0.1)   # zero
+  s0   <- sd_of(ps0)
+  co   <- ps0$coefs
+  expect_equal(unname(s0[names(co)]),
+               unname(pmax(2 * abs(co), 0.1)), tolerance = 1e-4)
+  # and it is much wider than the SE-based width for the strong predictor
+  se_x1 <- summary(fit)$coefficients["x1", "Std. Error"]
+  expect_gt(s0["x1"], 3 * (2 * se_x1))
+})
+
 test_that("extract_priors.lm errors with intercept-only model", {
   df  <- data.frame(y = rnorm(10))
   fit <- lm(y ~ 1, data = df)
