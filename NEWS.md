@@ -1,3 +1,35 @@
+# ErrorTracer 1.2.0 (development)
+
+This release addresses the correctness issues raised in peer review, starting
+with the uncertainty-budget consistency of the decomposition.
+
+## Breaking changes / behaviour changes
+
+* **Total variance now contains environmental uncertainty (T1).**
+  `decompose_uncertainty()` previously computed `total_var` from
+  `posterior_predict()` on the *unperturbed* predictors, so `env_var` was an
+  add-on that sat *outside* the total — the reported components could sum to
+  well over 100% of `total_var`. `total_var` is now **defined as the sum of
+  its components** (law of total variance):
+  `param_var + env_var + residual_var` for iid models, plus `temporal_var`
+  for autocorrelation models. The percentage shares now sum to 100% exactly,
+  and `env_var` is a genuine sub-share of a total that contains it.
+
+* **`et_predict()` folds environmental uncertainty into the credible interval
+  by default when `env_noise` is supplied.** The `include_env_in_ci` default
+  changed from `FALSE` to `NULL` (auto): env is now included whenever the
+  caller passes non-zero `env_noise`, so the reported forecast interval —
+  and therefore `shelf_life()` and `et_calibrate()` coverage — reflect
+  predictor/driver uncertainty and stay coherent with `total_var`. Pass
+  `include_env_in_ci = FALSE` to recover the previous parameter+residual
+  interval. The env-inclusive predictive is now constructed family-generally
+  (re-centring each posterior-predictive residual on the perturbed mean),
+  rather than the previous Gaussian-only `lp + sigma * N(0,1)`.
+
+* `et_sensitivity_profile()` / `et_plot_sensitivity()`: `env_share` is now
+  `env_var / total_var` (previously `env_var / (env_var + total_var)`), which
+  double-counted env once env entered the total.
+
 # ErrorTracer 1.1.0
 
 ## Breaking changes / deprecations
