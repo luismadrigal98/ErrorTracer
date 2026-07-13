@@ -104,6 +104,22 @@
 #'   Correlation (\code{env_cov}) is applied to the latent standard-normal
 #'   draws before the marginal quantile transform, so rank correlations are
 #'   preserved across distributions.
+#' @param env_ensemble Optional pathwise driver ensemble for forecasting under
+#'   uncertain future covariates.  A \strong{named list}, one entry per uncertain
+#'   driver predictor, where each entry is an \eqn{M \times H} matrix of
+#'   \eqn{M} scenario trajectories over the \eqn{H = \mathrm{nrow(newdata)}}
+#'   forecast steps (rows are scenarios, columns are horizon steps).  Unlike
+#'   \code{env_noise} --- which draws \emph{independent} per-observation jitter
+#'   that averages out and leaves the driver variance flat with lead time ---
+#'   each posterior draw here is paired with a whole \emph{trajectory}, so the
+#'   driver uncertainty is temporally coherent and \strong{accumulates with lead
+#'   time} as a real driver ensemble (e.g.\ CMIP members, or resampled
+#'   climatology) fans out.  Predictors absent from \code{env_ensemble} are held
+#'   at their \code{newdata} values.  When supplied, \code{env_ensemble}
+#'   supersedes \code{env_noise} for the perturbation and is folded into the
+#'   credible interval by default.  This is the recommended way to build a
+#'   genuine \emph{reforecast} in which only information available at the issue
+#'   date is used.
 #' @param n_draws Integer.  Number of posterior draws to use (default 2000;
 #'   capped at the number of draws available in the fit).
 #' @param ci_levels Numeric vector.  Credible interval levels to compute
@@ -181,7 +197,7 @@
 #'   \code{\link{et_calibrate}}
 #' @export
 et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
-                        env_dist = NULL,
+                        env_dist = NULL, env_ensemble = NULL,
                         n_draws = 2000L, ci_levels = c(0.5, 0.8, 0.9, 0.95),
                         n_perturb = NULL,
                         n_env_draws = 1L,
@@ -198,6 +214,7 @@ et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
 et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   env_cov = NULL,
                                   env_dist = NULL,
+                                  env_ensemble = NULL,
                                   n_draws = 2000L,
                                   ci_levels = c(0.5, 0.8, 0.9, 0.95),
                                   n_perturb = NULL,
@@ -323,14 +340,36 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                function(v) all(v == 0, na.rm = TRUE),
                                logical(1)))
 
-  # Resolve the auto (NULL) default for include_env_in_ci: fold environmental
-  # uncertainty into the interval whenever the user supplied non-zero
-  # env_noise. This keeps the reported forecast interval (and hence shelf life
-  # + calibration coverage) coherent with the env-inclusive total_var. Users
-  # can still force it on/off explicitly with TRUE/FALSE.
-  if (is.null(include_env_in_ci)) include_env_in_ci <- !all_zero_noise
+  # Pathwise driver-ensemble mode (T2): when env_ensemble is supplied, each
+  # posterior draw is paired with a whole covariate TRAJECTORY, so driver
+  # uncertainty is temporally coherent and accumulates with lead time (unlike
+  # iid per-observation env_noise). It supersedes iid noise for the perturbation.
+  has_ensemble <- !is.null(env_ensemble)
+  if (has_ensemble) {
+    env_ensemble <- .validate_env_ensemble(env_ensemble, pred_names, newdata)
+  }
 
-  lp_perturbed <- if (all_zero_noise) {
+  # There is environmental (driver) uncertainty if iid noise is non-zero OR a
+  # driver ensemble was supplied.
+  has_env_uncertainty <- (!all_zero_noise) || has_ensemble
+
+  # Resolve the auto (NULL) default for include_env_in_ci: fold environmental
+  # uncertainty into the interval whenever there is any. This keeps the reported
+  # forecast interval (and hence shelf life + calibration coverage) coherent
+  # with the env-inclusive total_var. Users can still override with TRUE/FALSE.
+  if (is.null(include_env_in_ci)) include_env_in_ci <- has_env_uncertainty
+
+  lp_perturbed <- if (has_ensemble) {
+    n_scen       <- nrow(env_ensemble[[1]])
+    scenario_ids <- rep_len(seq_len(n_scen), n_perturb)  # balanced, deterministic
+    .compute_lp_ensemble(
+      draws_mat    = draws_mat[seq_len(n_perturb), , drop = FALSE],
+      newdata      = newdata,
+      pred_names   = pred_names,
+      env_ensemble = env_ensemble,
+      scenario_ids = scenario_ids
+    )
+  } else if (all_zero_noise) {
     lp[seq_len(n_perturb), , drop = FALSE]
   } else {
     .compute_lp_perturbed(
@@ -359,7 +398,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # env-perturbed mean so predictor noise is folded into the interval
   # (family-general; see .inflate_env_predictive).
   ci_draws <- if (interval_type == "predictive") {
-    if (isTRUE(include_env_in_ci) && !all_zero_noise) {
+    if (isTRUE(include_env_in_ci) && has_env_uncertainty) {
       .inflate_env_predictive(mu_perturbed, pp, mu_draws)
     } else {
       pp
@@ -394,6 +433,10 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
       env_noise          = env_noise,
       env_cov            = cor_mat,
       env_dist           = dist_spec,
+      env_ensemble       = if (has_ensemble)
+                             list(n_scenarios = nrow(env_ensemble[[1]]),
+                                  drivers     = names(env_ensemble))
+                           else NULL,
       n_draws            = n_draws,
       interval_type      = interval_type,
       include_env_in_ci  = isTRUE(include_env_in_ci)
@@ -410,6 +453,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
 et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       env_cov = NULL,
                                       env_dist = NULL,
+                                      env_ensemble = NULL,
                                       n_draws = 2000L,
                                       ci_levels = c(0.5, 0.8, 0.9, 0.95),
                                       n_perturb = NULL,
@@ -447,6 +491,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
         env_noise         = env_noise,
         env_cov           = env_cov,
         env_dist          = env_dist,
+        env_ensemble      = env_ensemble,
         n_draws           = n_draws,
         ci_levels         = ci_levels,
         n_perturb         = n_perturb,
@@ -583,6 +628,99 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     }
   }
 
+  lp_mat
+}
+
+# Validate and normalise a driver ensemble (T2). Returns a named list of
+# numeric [M x H] matrices (M scenarios x H = nrow(newdata) horizon steps),
+# restricted to predictors that are actually in the model.
+.validate_env_ensemble <- function(env_ensemble, pred_names, newdata) {
+  if (!is.list(env_ensemble) || is.null(names(env_ensemble)) ||
+      any(names(env_ensemble) == "")) {
+    stop("env_ensemble must be a NAMED list of [M x H] matrices, one per ",
+         "driver predictor (M scenarios by H = nrow(newdata) horizon steps).")
+  }
+  H <- nrow(newdata)
+
+  unknown <- setdiff(names(env_ensemble), pred_names)
+  if (length(unknown)) {
+    .et_warn("env_ensemble contains predictor(s) not in model: ",
+             paste(unknown, collapse = ", "), " -- ignored.")
+    env_ensemble <- env_ensemble[intersect(names(env_ensemble), pred_names)]
+  }
+  if (length(env_ensemble) == 0L) {
+    stop("env_ensemble has no drivers matching the model predictors.")
+  }
+
+  mats <- lapply(env_ensemble, function(e) {
+    m <- as.matrix(e)
+    storage.mode(m) <- "double"
+    m
+  })
+  Ms <- vapply(mats, nrow, integer(1))
+  Hs <- vapply(mats, ncol, integer(1))
+  if (any(Hs != H)) {
+    stop("each env_ensemble[[p]] must have ncol == nrow(newdata) (= ", H,
+         "); a driver had ", paste(unique(Hs), collapse = ", "), " columns. ",
+         "Rows are scenarios, columns are forecast/horizon steps.")
+  }
+  if (length(unique(Ms)) != 1L) {
+    stop("all env_ensemble drivers must share the same number of scenarios ",
+         "(rows); got ", paste(unique(Ms), collapse = ", "), ".")
+  }
+  if (unique(Ms) < 2L) {
+    stop("env_ensemble needs at least 2 scenarios to carry driver uncertainty.")
+  }
+  mats
+}
+
+# Pathwise driver-ensemble linear predictor (T2). Instead of iid per-observation
+# noise, each posterior draw is paired with a whole covariate TRAJECTORY drawn
+# from a user-supplied driver ensemble (e.g. CMIP members or resampled
+# climatology). Because a trajectory is temporally coherent -- a warm scenario
+# stays warm across the whole horizon -- and ensembles fan out with lead time,
+# the resulting driver variance ACCUMULATES with lead time, unlike iid jitter
+# (which averages out and stays flat). Non-ensemble predictors are held at their
+# newdata values.
+#
+# draws_mat    : [n_perturb x n_params] posterior draws (betas + intercept)
+# newdata      : [H x .] forecast rows; supplies the fixed predictors
+# pred_names   : model predictor names
+# env_ensemble : named list; env_ensemble[[p]] is an [M x H] matrix of scenario
+#                trajectories for driver predictor p
+# scenario_ids : integer vector length n_perturb, the scenario paired with each
+#                draw
+.compute_lp_ensemble <- function(draws_mat, newdata, pred_names,
+                                 env_ensemble, scenario_ids) {
+  n_perturb <- nrow(draws_mat)
+  H         <- nrow(newdata)
+
+  beta_cols   <- paste0("b_", pred_names)
+  avail_betas <- intersect(beta_cols, colnames(draws_mat))
+  avail_preds <- sub("^b_", "", avail_betas)
+  if (length(avail_betas) == 0L) {
+    .et_warn("No beta columns found in draws matrix -- returning zero LP.")
+    return(matrix(0, n_perturb, H))
+  }
+
+  int_vals <- if ("b_Intercept" %in% colnames(draws_mat)) {
+    draws_mat[, "b_Intercept"]
+  } else {
+    rep(0, n_perturb)
+  }
+
+  X_base <- as.matrix(newdata[, avail_preds, drop = FALSE])  # H x P
+  driver_names <- intersect(names(env_ensemble), avail_preds)
+
+  lp_mat <- matrix(NA_real_, n_perturb, H)
+  for (i in seq_len(n_perturb)) {
+    Xi <- X_base
+    m  <- scenario_ids[i]
+    for (p in driver_names) {
+      Xi[, p] <- env_ensemble[[p]][m, ]   # scenario m's trajectory for driver p
+    }
+    lp_mat[i, ] <- int_vals[i] + as.numeric(Xi %*% draws_mat[i, avail_betas])
+  }
   lp_mat
 }
 

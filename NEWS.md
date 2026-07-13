@@ -76,6 +76,19 @@ with the uncertainty-budget consistency of the decomposition.
 
 ## New features
 
+* **Pathwise driver ensembles for genuine reforecasts (T2).** `et_predict()`
+  gains an `env_ensemble` argument: a named list of \eqn{M \times H} matrices
+  (M scenario trajectories over the H forecast steps), one per uncertain driver
+  predictor. Each posterior draw is paired with a whole covariate *trajectory*,
+  so driver uncertainty is temporally coherent and **accumulates with lead
+  time** as a real driver ensemble (CMIP members, resampled climatology) fans
+  out — unlike the existing `env_noise`, whose independent per-observation
+  jitter averages out and leaves the driver variance flat. This is the
+  recommended way to build a reforecast that uses only information available at
+  the issue date, and it reproduces the growing driver-variance fraction of
+  Dietze (2017) and Thomas et al. (2020). `env_ensemble` supersedes `env_noise`
+  for the perturbation and is folded into the credible interval by default.
+
 * `shelf_life()` now includes `se_t_star` in the projected-mode horizon
   attribute. This is the delta-method standard error of the projected
   crossing time `t* = (τ − a) / b`, propagating the linear-fit covariance.

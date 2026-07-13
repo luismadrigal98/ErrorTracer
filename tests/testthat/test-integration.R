@@ -192,6 +192,37 @@ test_that("AR(1) forecast variance accumulates with lead time", {
   expect_equal(recon, d$total_var, tolerance = 1e-8)
 })
 
+# ── Pathwise driver ensemble (T2) ────────────────────────────────────────────
+
+test_that("env_ensemble makes driver variance grow with lead time", {
+  set.seed(21L)
+  tr <- data.frame(x = rnorm(40))
+  tr$y <- 1 + 2 * tr$x + rnorm(40, sd = 0.5)
+  fit <- suppressWarnings(et_fit(
+    y ~ x, data = tr, chains = 1L, iter = 500L, warmup = 250L,
+    cores = 1L, seed = 1L, refresh = 0L
+  ))
+  H <- 10L; M <- 40L
+  x_mean <- seq(0, 1, length.out = H)
+  ens    <- t(replicate(M, x_mean + cumsum(rnorm(H, 0, 0.2))))  # fans out
+
+  pr <- suppressWarnings(et_predict(
+    fit, newdata = data.frame(x = x_mean),
+    env_ensemble = list(x = ens), n_draws = 300L
+  ))
+  d <- decompose_uncertainty(pr)
+
+  # Driver (env) variance and the interval grow with lead time
+  expect_gt(d$env_var[H], 2 * d$env_var[1])
+  w95 <- pr$credible_intervals
+  w95 <- w95$width[w95$ci_level == 0.95]
+  expect_gt(w95[H], w95[1])
+  # Budget reconciles; ensemble metadata is recorded
+  recon <- d$param_var + d$env_var + d$residual_var
+  expect_equal(recon, d$total_var, tolerance = 1e-8)
+  expect_equal(pr$env_ensemble$n_scenarios, M)
+})
+
 # ── et_fit with lm prior (default method path) ───────────────────────────────
 
 test_that("et_fit works with flat (NULL) priors", {
