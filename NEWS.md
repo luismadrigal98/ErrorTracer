@@ -76,6 +76,17 @@ with the uncertainty-budget consistency of the decomposition.
 
 ## New features
 
+* **PIT / rank-histogram calibration diagnostics (T4).** New `et_pit()` computes
+  the probability integral transform of held-out observations under the reported
+  posterior predictive distribution (the same distribution the intervals and
+  `et_calibrate()` coverage use, environmental uncertainty included), and
+  `et_plot_pit()` renders the PIT histogram with a uniform reference band. This
+  is the full-distribution diagnostic — a U-shape flags overconfident
+  intervals, a hump flags under-confidence, a tilt flags bias — that coverage
+  alone cannot provide. `et_pit()` supports randomized PIT for discrete
+  predictions. `et_prediction` objects now store `predictive_draws`, the exact
+  draws the interval / PIT / calibration all share.
+
 * **Pathwise driver ensembles for genuine reforecasts (T2).** `et_predict()`
   gains an `env_ensemble` argument: a named list of \eqn{M \times H} matrices
   (M scenario trajectories over the H forecast steps), one per uncertain driver

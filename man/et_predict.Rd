@@ -10,12 +10,13 @@ et_predict(
   env_noise = NULL,
   env_cov = NULL,
   env_dist = NULL,
+  env_ensemble = NULL,
   n_draws = 2000L,
   ci_levels = c(0.5, 0.8, 0.9, 0.95),
   n_perturb = NULL,
   n_env_draws = 1L,
   interval_type = c("predictive", "linpred"),
-  include_env_in_ci = FALSE,
+  include_env_in_ci = NULL,
   ...
 )
 }
@@ -117,6 +118,23 @@ Correlation (\code{env_cov}) is applied to the latent standard-normal
 draws before the marginal quantile transform, so rank correlations are
 preserved across distributions.}
 
+\item{env_ensemble}{Optional pathwise driver ensemble for forecasting under
+uncertain future covariates.  A \strong{named list}, one entry per uncertain
+driver predictor, where each entry is an \eqn{M \times H} matrix of
+\eqn{M} scenario trajectories over the \eqn{H = \mathrm{nrow(newdata)}}
+forecast steps (rows are scenarios, columns are horizon steps).  Unlike
+\code{env_noise} --- which draws \emph{independent} per-observation jitter
+that averages out and leaves the driver variance flat with lead time ---
+each posterior draw here is paired with a whole \emph{trajectory}, so the
+driver uncertainty is temporally coherent and \strong{accumulates with lead
+time} as a real driver ensemble (e.g.\ CMIP members, or resampled
+climatology) fans out.  Predictors absent from \code{env_ensemble} are held
+at their \code{newdata} values.  When supplied, \code{env_ensemble}
+supersedes \code{env_noise} for the perturbation and is folded into the
+credible interval by default.  This is the recommended way to build a
+genuine \emph{reforecast} in which only information available at the issue
+date is used.}
+
 \item{n_draws}{Integer.  Number of posterior draws to use (default 2000;
 capped at the number of draws available in the fit).}
 
@@ -153,18 +171,19 @@ The decomposition components and \code{posterior_predict} /
 \code{posterior_linpred} matrices are always computed regardless of this
 setting.}
 
-\item{include_env_in_ci}{Logical.  When \code{TRUE} and
-\code{interval_type = "predictive"}, credible intervals are constructed
-from \strong{environmentally inflated} draws
-\eqn{\tilde y = \tilde{\mathrm{lp}} + \varepsilon}, with
-\eqn{\tilde{\mathrm{lp}}} the perturbed linear predictor and
-\eqn{\varepsilon \sim N(0, \sigma^2)} using posterior draws of
-\eqn{\sigma}.  This folds the environmental uncertainty component back
-into the CI, which is typically what you want for sensitivity analyses
-or whenever the reported interval should cover predictor-measurement
-error.  When \code{FALSE} (default, backward compatible), CIs are based
-on \code{posterior_predict} only --- parameter + residual, without
-predictor noise.}
+\item{include_env_in_ci}{Logical or \code{NULL}.  Controls whether
+environmental (predictor) uncertainty is folded into the credible
+interval when \code{interval_type = "predictive"}.  When \code{TRUE},
+intervals are built from \strong{environmentally inflated} draws in which
+each posterior-predictive residual is re-centred on the env-perturbed
+response-scale mean, \eqn{\tilde y = \tilde\mu + (y^{pp} - \mu)}
+(family-general; for Gaussian identity this equals
+\eqn{\tilde{\mathrm{lp}} + \varepsilon}, \eqn{\varepsilon\sim N(0,\sigma^2)}).
+The interval variance is then param + env + residual, coherent with the
+env-inclusive \code{total_var}.  The default \code{NULL} means
+\strong{auto}: env is folded in whenever the caller supplied non-zero
+\code{env_noise}, and omitted otherwise.  Pass \code{FALSE} to force a
+parameter + residual interval even when \code{env_noise} is given.}
 
 \item{...}{Passed to methods.}
 }

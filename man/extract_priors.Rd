@@ -13,6 +13,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
+  shrinkage = c("zero", "estimate"),
   intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
@@ -22,6 +23,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
+  shrinkage = c("zero", "estimate"),
   intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
@@ -31,6 +33,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
+  shrinkage = c("zero", "estimate"),
   intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
@@ -40,6 +43,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
+  shrinkage = c("zero", "estimate"),
   intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   lambda = "lambda.min",
@@ -50,6 +54,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
+  shrinkage = c("zero", "estimate"),
   intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   s = 1L,
@@ -60,6 +65,7 @@ extract_priors(
   model,
   multiplier = 2,
   min_sd = 0.1,
+  shrinkage = c("zero", "estimate"),
   intercept_prior_sd = NULL,
   sigma_prior_scale = 1,
   ...
@@ -80,6 +86,13 @@ extract_priors(
 
 \item{min_sd}{Numeric scalar.  Minimum prior SD to avoid degenerate
 (spike) priors on near-zero coefficients.  Default 0.1.}
+
+\item{shrinkage}{Character.  Sets the prior \emph{mean}: \code{"zero"}
+(default) centres every coefficient prior at 0 (a regularizing prior with
+a data-informed scale but no reused location); \code{"estimate"} uses the
+fitted coefficient as the prior mean (informative, but reuses the data ---
+see the double-use note above).  For \code{ranger} the mean is always 0
+(no signed coefficients), so \code{shrinkage} has no effect.}
 
 \item{intercept_prior_sd}{Optional prior SD for the intercept term.  The
 default \code{NULL} emits \emph{no} explicit intercept prior and lets
@@ -119,10 +132,14 @@ An \code{et_prior_spec} list containing:
 }
 \description{
 Converts a fitted model object into a \code{brms} prior specification
-suitable for \code{\link{et_fit}}.  The coefficient estimates (or
-importance weights for \pkg{ranger}) from the regularized or standard fit are used as
-informative prior means, so the Bayesian model starts close to the
-regularized or standard solution while remaining open to data-driven revision.
+suitable for \code{\link{et_fit}}.  The regularized or standard fit sets the
+\emph{scale} of each coefficient's prior (its SD); the \code{shrinkage}
+argument controls the prior \emph{mean}.  With the default
+\code{shrinkage = "zero"} the priors are centred at zero --- a regularizing
+(ridge-style) prior whose width is informed by the fit but whose location
+carries no reused point estimate.  With \code{shrinkage = "estimate"} the
+coefficient estimates are used as informative prior means, so the Bayesian
+model starts close to the regularized solution.
 }
 \details{
 For \code{ranger} models, signed coefficients are not available.  Priors
@@ -131,6 +148,20 @@ is set to \code{multiplier * importance_normalised}, where importance is
 normalised to the \code{[min_sd, 1]} interval.  Only variables with
 positive permutation importance are included.
 }
+\section{Prior/likelihood double use}{
+
+Centring the priors on the coefficient \emph{estimates}
+(\code{shrinkage = "estimate"}) and then refitting the Bayesian model on the
+\emph{same} data uses those data twice --- once to locate the prior mean and
+once through the likelihood --- which can make posteriors overconfident,
+especially at small \eqn{n}.  The default \code{shrinkage = "zero"} avoids
+this by not reusing the estimated location: only the prior scale is
+data-informed, which is a standard weakly-informative device.  If you use
+\code{shrinkage = "estimate"}, check calibration with
+\code{\link{et_calibrate}}, or build the priors on data held out from the
+likelihood fit.
+}
+
 \examples{
 fit_lm <- lm(mpg ~ wt + hp + cyl, data = mtcars)
 ps <- extract_priors(fit_lm, multiplier = 2, min_sd = 0.1)

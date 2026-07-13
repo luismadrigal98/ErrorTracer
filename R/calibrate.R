@@ -127,6 +127,110 @@ et_calibrate.et_prediction_list <- function(predictions, observed,
 }
 
 # ******************************************************************************
+# et_pit(): probability integral transform (full-distribution calibration)
+# ______________________________________________________________________________
+
+#' Probability integral transform (PIT) for calibration diagnostics
+#'
+#' Computes the probability integral transform of held-out observations under
+#' the (reported) posterior predictive distribution --- the same distribution
+#' the credible intervals and \code{\link{et_calibrate}} coverage are built
+#' from, including environmental uncertainty when it was folded in.  For a
+#' well-calibrated model the PIT values are \eqn{\mathrm{Uniform}(0, 1)}.
+#' Systematic departures diagnose \emph{how} the model is miscalibrated, which
+#' interval coverage alone cannot: a \strong{U-shape} means the predictive is
+#' too narrow (overconfident), a central \strong{hump} means it is too wide
+#' (underconfident), and a \strong{slope / shift} means it is biased.  Visualise
+#' with \code{\link{et_plot_pit}} (a PIT / rank histogram).
+#'
+#' @param predictions An \code{et_prediction} or \code{et_prediction_list}.
+#' @param observed A \code{data.frame} of true responses, positionally matched
+#'   to \code{predictions$newdata} (and containing the grouping column for a
+#'   grouped prediction).
+#' @param response_col Character.  Response column name; inferred from the model
+#'   formula when \code{NULL}.
+#' @param randomize Logical.  Use the \emph{randomized} PIT (default
+#'   \code{TRUE}), which spreads the probability mass at ties so the values are
+#'   uniform under calibration for \strong{discrete} predictions (counts,
+#'   binary).  It is a no-op for continuous predictions, where exact ties have
+#'   probability ~0.  Set \code{FALSE} for the non-randomized
+#'   \eqn{P(Y \le y)}.
+#' @param ... Unused.
+#' @return A \code{data.frame} with columns \code{obs_id} and \code{pit} (plus a
+#'   leading \code{group} column for grouped predictions).
+#' @seealso \code{\link{et_plot_pit}}, \code{\link{et_calibrate}}
+#' @export
+et_pit <- function(predictions, observed, response_col = NULL,
+                   randomize = TRUE, ...) {
+  UseMethod("et_pit")
+}
+
+#' @export
+et_pit.et_prediction <- function(predictions, observed, response_col = NULL,
+                                  randomize = TRUE, ...) {
+  response_col <- .resolve_response_col(response_col, predictions$model)
+  if (nrow(observed) != nrow(predictions$newdata)) {
+    stop("observed must have the same number of rows as newdata (",
+         nrow(predictions$newdata), "), got ", nrow(observed), ".")
+  }
+  y_true <- observed[[response_col]]
+  if (is.null(y_true)) {
+    stop("Column '", response_col, "' not found in observed data.frame.")
+  }
+  draws <- predictions$predictive_draws %||% predictions$posterior_predict
+  data.frame(
+    obs_id = seq_along(y_true),
+    pit    = .compute_pit(draws, y_true, randomize = randomize),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @export
+et_pit.et_prediction_list <- function(predictions, observed, response_col = NULL,
+                                       randomize = TRUE, ...) {
+  grouping <- predictions$grouping
+  if (!grouping %in% colnames(observed)) {
+    stop("Grouping column '", grouping, "' not found in observed.")
+  }
+  parts <- lapply(names(predictions$predictions), function(g) {
+    pred <- predictions$predictions[[g]]
+    if (is.null(pred)) return(NULL)
+    obs_g <- observed[observed[[grouping]] == g, , drop = FALSE]
+    if (nrow(obs_g) == 0) return(NULL)
+    rc <- .resolve_response_col(response_col, pred$model)
+    y_true <- obs_g[[rc]]
+    if (is.null(y_true) || length(y_true) != nrow(pred$newdata)) return(NULL)
+    draws <- pred$predictive_draws %||% pred$posterior_predict
+    cbind(
+      data.frame(group = g, stringsAsFactors = FALSE),
+      data.frame(obs_id = seq_along(y_true),
+                 pit = .compute_pit(draws, y_true, randomize = randomize),
+                 stringsAsFactors = FALSE)
+    )
+  })
+  do.call(rbind, Filter(Negate(is.null), parts))
+}
+
+# PIT of each observation under its predictive column.
+# draws : [S x n_obs] predictive draws; y_true : length n_obs.
+.compute_pit <- function(draws, y_true, randomize = TRUE) {
+  vapply(seq_along(y_true), function(i) {
+    yi  <- y_true[i]
+    if (is.na(yi)) return(NA_real_)
+    col <- draws[, i]
+    col <- col[!is.na(col)]
+    if (length(col) == 0L) return(NA_real_)
+    below <- mean(col < yi)
+    if (randomize) {
+      eq <- mean(col == yi)                 # >0 only for discrete/ties
+      below + stats::runif(1) * eq
+    } else {
+      mean(col <= yi)
+    }
+  }, numeric(1))
+}
+
+# ******************************************************************************
 # et_diagnose(): MCMC convergence + LOO diagnostics
 # ______________________________________________________________________________
 

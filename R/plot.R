@@ -505,6 +505,53 @@ et_plot_sensitivity <- function(sens, show = c("horizon", "env_share", "ratio"))
   p + et_theme()
 }
 
+#' Plot a PIT / rank histogram for calibration
+#'
+#' Histogram of the probability-integral-transform values from
+#' \code{\link{et_pit}}.  Bars level with the dashed uniform reference line
+#' indicate calibration; a \strong{U-shape} means overconfident (too-narrow)
+#' intervals, a central \strong{hump} means underconfident (too-wide), and a
+#' \strong{tilt} means bias.  The shaded band is an approximate 95\% consistency
+#' region for the bar heights under uniformity.
+#'
+#' @param pit A \code{data.frame} from \code{\link{et_pit}} (a \code{pit} column,
+#'   optionally \code{group}), or a bare numeric vector of PIT values.
+#' @param bins Integer.  Number of histogram bins (default 10).
+#' @return A \code{ggplot} object.
+#' @seealso \code{\link{et_pit}}, \code{\link{et_plot_calibration}}
+#' @export
+et_plot_pit <- function(pit, bins = 10L) {
+  df <- if (is.numeric(pit)) data.frame(pit = pit) else pit
+  if (!"pit" %in% colnames(df)) {
+    stop("`pit` must be a numeric vector or a data.frame with a 'pit' column ",
+         "(as returned by et_pit()).")
+  }
+  bins      <- max(2L, as.integer(bins))
+  has_group <- "group" %in% colnames(df)
+  breaks    <- seq(0, 1, length.out = bins + 1L)
+
+  # Expected bar height and an approximate 95% band under uniformity.
+  n_per    <- if (has_group) as.numeric(tapply(!is.na(df$pit), df$group, sum))
+              else sum(!is.na(df$pit))
+  expected <- mean(n_per) / bins
+  band     <- 1.96 * sqrt(expected * (1 - 1 / bins))
+
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[["pit"]])) +
+    ggplot2::annotate("rect", xmin = 0, xmax = 1,
+                      ymin = max(0, expected - band), ymax = expected + band,
+                      fill = "grey80", alpha = 0.5) +
+    ggplot2::geom_histogram(breaks = breaks, boundary = 0,
+                            fill = "steelblue", color = "white") +
+    ggplot2::geom_hline(yintercept = expected, linetype = "dashed",
+                        color = "grey40") +
+    ggplot2::labs(x = "PIT", y = "Count",
+                  title = "PIT histogram (calibration)") +
+    et_theme()
+
+  if (has_group) p <- p + ggplot2::facet_wrap(ggplot2::vars(.data[["group"]]))
+  p
+}
+
 # Permissive wrapper for scales::percent — fall back to identity if the
 # scales package isn't installed so the plot still renders.
 scales_percent_safe <- function(x) {

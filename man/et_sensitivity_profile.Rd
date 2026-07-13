@@ -76,9 +76,10 @@ An \code{et_sensitivity} object: a \code{data.frame} with one row
       for absolute-grid rows.}
     \item{\code{param_var, env_var, residual_var, total_var}}{Mean across
       forecast observations.}
-    \item{\code{env_share}}{\code{env_var / (env_var + total_var)} ---
-      the fraction of combined predictive variance attributable to
-      predictor noise (bounded in \eqn{[0, 1]}).}
+    \item{\code{env_share}}{\code{env_var / total_var} --- the fraction
+      of total predictive variance attributable to predictor noise.
+      Because \code{total_var} now contains \code{env_var} as a sub-share
+      (law of total variance), this is bounded in \eqn{[0, 1]}.}
     \item{\code{ci_width_mean, ci_width_max}}{At \code{ci_level}.}
     \item{\code{ratio_mean, ratio_max}}{CI width / plausible range.}
     \item{\code{horizon_type}}{One of \code{"observed"}, \code{"projected"},

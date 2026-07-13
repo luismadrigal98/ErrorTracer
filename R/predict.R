@@ -397,15 +397,15 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # is predictive, re-centre each posterior-predictive residual on the
   # env-perturbed mean so predictor noise is folded into the interval
   # (family-general; see .inflate_env_predictive).
-  ci_draws <- if (interval_type == "predictive") {
-    if (isTRUE(include_env_in_ci) && has_env_uncertainty) {
-      .inflate_env_predictive(mu_perturbed, pp, mu_draws)
-    } else {
-      pp
-    }
+  # Full predictive draws implied by the reported forecast, with environmental
+  # (driver) uncertainty folded in when applicable. Single source of truth for
+  # the predictive interval AND for PIT / calibration, so all three agree.
+  predictive_draws <- if (isTRUE(include_env_in_ci) && has_env_uncertainty) {
+    .inflate_env_predictive(mu_perturbed, pp, mu_draws)
   } else {
-    lp
+    pp
   }
+  ci_draws <- if (interval_type == "predictive") predictive_draws else lp
   ci_df <- .compute_ci(ci_draws, ci_levels)
 
   # --- 8. Decomposition (all components on response scale) ---
@@ -425,6 +425,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
       posterior_predict  = pp,
       posterior_linpred  = lp,
       lp_perturbed       = lp_perturbed,
+      predictive_draws   = predictive_draws,
       sigma_draws        = sigma_draws,
       credible_intervals = ci_df,
       decomposition      = decomp,
