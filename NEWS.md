@@ -76,6 +76,21 @@ with the uncertainty-budget consistency of the decomposition.
 
 ## New features
 
+* **Null-model forecast skill + shelf-life skill gate (T6).** New
+  `et_skill_score()` scores a forecast against a null model — a random walk
+  (persistence) or climatology — with the continuous ranked probability score
+  (CRPS) and reports the per-lead-time skill and the null-relative
+  \strong{forecast limit} (the lead time at which the model stops beating the
+  null), following the ecological-forecasting convention (Petchey et al. 2015;
+  Wesselkamp et al. 2025; the NEON challenge). `shelf_life()` gains a `skill`
+  argument: passing an `et_skill_score()` table gates the shelf life so a
+  period counts as informative only if it is both precise \emph{and} skillful,
+  preventing a precise-but-biased forecast from passing. `shelf_life()` is now
+  documented as a \emph{precision} complement to the accuracy-relative forecast
+  limit, and its `response_scale` now defaults to the training-response range
+  (a documented, reproducible default) instead of requiring an arbitrary
+  number.
+
 * **PIT / rank-histogram calibration diagnostics (T4).** New `et_pit()` computes
   the probability integral transform of held-out observations under the reported
   posterior predictive distribution (the same distribution the intervals and

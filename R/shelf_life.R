@@ -6,6 +6,17 @@
 #' width of credible intervals to a response scale.  A forecast is
 #' uninformative when its CI width exceeds \code{threshold * response_scale}.
 #'
+#' Shelf life is a \strong{precision} criterion on the response scale --- a
+#' deliberate \emph{complement} to accuracy-relative forecast limits (Petchey
+#' et al. 2015; Wesselkamp et al. 2025), not a replacement.  It answers "when do
+#' the error bars get too wide to act on?", whereas a forecast limit answers
+#' "when does the model stop beating a null?".  Because a forecast can be
+#' precise yet biased, pass a \code{skill} table from \code{\link{et_skill_score}}
+#' to \strong{gate} the shelf life on skill: a period then counts as
+#' informative only if it is both precise \emph{and} beats the null model.  This
+#' couples the two views and prevents a precise-but-biased forecast from
+#' silently passing.
+#'
 #' The function operates in three modes depending on the available data and
 #' whether the uninformative threshold is crossed within the forecast window:
 #'
@@ -38,9 +49,10 @@
 #' @param predictions An \code{et_prediction} or \code{et_prediction_list}.
 #' @param response_scale Numeric vector of length 2 (\code{c(min, max)})
 #'   giving the response scale used as the denominator in the
-#'   CI-width / range ratio.  For unbounded responses use
-#'   \code{range(training_data$response)} as a conservative default, or
-#'   supply a biologically motivated interval.
+#'   CI-width / range ratio.  Supply a biologically motivated interval when
+#'   one exists.  When \code{NULL} (default), the observed range of the
+#'   \strong{training response} is used as a documented, reproducible default
+#'   (with an informational message) instead of an arbitrary number.
 #'   The effective range is \code{diff(response_scale)}.
 #' @param ci_level Numeric.  The credible interval level to use (default
 #'   0.90).  Must be present in the \code{et_prediction} object.
@@ -49,6 +61,12 @@
 #' @param time_col Character.  Optional column in
 #'   \code{predictions$newdata} to use as the time axis.  If \code{NULL},
 #'   observation index is used.
+#' @param skill Optional skill gate.  A \code{data.frame} returned by
+#'   \code{\link{et_skill_score}} (positionally matched to the forecast rows;
+#'   its \code{skillful} column is used) or a bare logical vector.  When
+#'   supplied, a forecast period is \code{informative} only if it is both
+#'   precise \emph{and} skillful, so a precise-but-biased forecast does not
+#'   pass.  When \code{NULL} (default) the precision criterion is used alone.
 #' @param min_slope_for_projection Numeric.  Minimum linear slope (of
 #'   ratio vs.\ time) required to attempt extrapolation when all periods
 #'   are informative.  Below this value the shelf life is reported as a
@@ -103,17 +121,20 @@
 #' }
 #' @export
 shelf_life <- function(predictions,
-                       response_scale,
+                       response_scale = NULL,
                        ci_level = 0.90,
                        threshold = 1.0,
                        time_col = NULL,
+                       skill = NULL,
                        min_slope_for_projection = 1e-4,
                        max_extrapolation_factor = 10,
                        ...,
                        plausible_range = NULL) {
-  # Deprecated alias: plausible_range -> response_scale
+  # Deprecated alias: plausible_range -> response_scale. Re-call (rather than
+  # reassign) because UseMethod() dispatches with the originally-supplied
+  # arguments, not values modified in this frame.
   if (!is.null(plausible_range)) {
-    if (!missing(response_scale)) {
+    if (!is.null(response_scale)) {
       stop("Cannot specify both 'response_scale' and 'plausible_range'.")
     }
     warning(
@@ -126,6 +147,7 @@ shelf_life <- function(predictions,
       ci_level                 = ci_level,
       threshold                = threshold,
       time_col                 = time_col,
+      skill                    = skill,
       min_slope_for_projection = min_slope_for_projection,
       max_extrapolation_factor = max_extrapolation_factor,
       ...
@@ -136,20 +158,23 @@ shelf_life <- function(predictions,
 
 #' @export
 shelf_life.et_prediction <- function(predictions,
-                                     response_scale,
+                                     response_scale = NULL,
                                      ci_level = 0.90,
                                      threshold = 1.0,
                                      time_col = NULL,
+                                     skill = NULL,
                                      min_slope_for_projection = 1e-4,
                                      max_extrapolation_factor = 10,
                                      ...,
                                      plausible_range = NULL) {
+  skill_ok <- if (!is.null(skill)) .skill_ok_vector(skill) else NULL
   .compute_shelf_life_single(
     predictions = predictions,
     response_scale = response_scale,
     ci_level = ci_level,
     threshold = threshold,
     time_col = time_col,
+    skill_ok = skill_ok,
     min_slope_for_projection = min_slope_for_projection,
     max_extrapolation_factor = max_extrapolation_factor
   )
@@ -157,10 +182,11 @@ shelf_life.et_prediction <- function(predictions,
 
 #' @export
 shelf_life.et_prediction_list <- function(predictions,
-                                          response_scale,
+                                          response_scale = NULL,
                                           ci_level = 0.90,
                                           threshold = 1.0,
                                           time_col = NULL,
+                                          skill = NULL,
                                           min_slope_for_projection = 1e-4,
                                           max_extrapolation_factor = 10,
                                           ...,
@@ -171,9 +197,20 @@ shelf_life.et_prediction_list <- function(predictions,
     pred <- predictions$predictions[[g]]
     if (is.null(pred)) return(NULL)
 
+    # Per-group skill gate: subset the skill table to this group if grouped.
+    skill_ok_g <- if (!is.null(skill)) {
+      if ("group" %in% colnames(skill)) {
+        .skill_ok_vector(skill[skill$group == g, , drop = FALSE])
+      } else {
+        .skill_ok_vector(skill)
+      }
+    } else NULL
+
     sl <- .compute_shelf_life_single(
       pred, response_scale, ci_level, threshold,
-      time_col, min_slope_for_projection, max_extrapolation_factor
+      time_col, skill_ok = skill_ok_g,
+      min_slope_for_projection = min_slope_for_projection,
+      max_extrapolation_factor = max_extrapolation_factor
     )
     horizon_by_group[[g]] <<- attr(sl, "horizon")
     cbind(data.frame(group = g, stringsAsFactors = FALSE), sl)
@@ -197,6 +234,7 @@ shelf_life.default <- function(predictions, ...) {
 
 .compute_shelf_life_single <- function(predictions, response_scale,
                                         ci_level, threshold, time_col,
+                                        skill_ok = NULL,
                                         min_slope_for_projection,
                                         max_extrapolation_factor = 10) {
   ci_df <- predictions$credible_intervals
@@ -212,6 +250,18 @@ shelf_life.default <- function(predictions, ...) {
 
   ci_sub <- ci_df[ci_df$ci_level == ci_level, ]
 
+  # Principled default: when response_scale is unspecified, use the observed
+  # range of the training response as a conservative, documented default rather
+  # than an arbitrary user number (addresses the "where did the threshold come
+  # from?" critique). Users should still supply a domain-meaningful range when
+  # one exists.
+  if (is.null(response_scale)) {
+    response_scale <- .default_response_scale(predictions)
+    .et_info("shelf_life(): response_scale not supplied; using the training ",
+             "response range c(", round(response_scale[1], 4), ", ",
+             round(response_scale[2], 4), "). Supply a domain-meaningful ",
+             "range for a principled threshold.")
+  }
   if (length(response_scale) != 2) {
     stop("response_scale must be a numeric vector of length 2: c(min, max).")
   }
@@ -225,13 +275,31 @@ shelf_life.default <- function(predictions, ...) {
     ci_sub$row_id
   }
 
+  # Precision criterion: CI width small relative to the response scale.
+  precise <- ci_sub$width < threshold * pr
+  # Skill gate: a precise forecast is only *informative* if it is also skillful
+  # (beats the null / is not precise-but-biased). Without a skill table the gate
+  # is a no-op (precision alone).
+  if (!is.null(skill_ok)) {
+    if (length(skill_ok) != length(precise)) {
+      .et_warn("skill gate length (", length(skill_ok), ") does not match the ",
+               "number of forecast rows (", length(precise),
+               "); ignoring the skill gate.")
+      informative <- precise
+    } else {
+      informative <- precise & (skill_ok %in% TRUE)
+    }
+  } else {
+    informative <- precise
+  }
+
   result_df <- data.frame(
     obs_id = ci_sub$row_id,
     time = time_vals,
     ci_width = ci_sub$width,
     plausible_range = pr,
     ratio = ci_sub$width / pr,
-    informative = ci_sub$width < threshold * pr,
+    informative = informative,
     stringsAsFactors = FALSE
   )
 
@@ -243,6 +311,32 @@ shelf_life.default <- function(predictions, ...) {
   attr(result, "horizon") <- horizon
   attr(result, "threshold") <- threshold
   result
+}
+
+# Extract the logical skill gate from an et_skill_score() table (or a bare
+# logical vector).
+.skill_ok_vector <- function(skill) {
+  if (is.data.frame(skill) && "skillful" %in% colnames(skill)) {
+    as.logical(skill$skillful)
+  } else if (is.logical(skill)) {
+    skill
+  } else {
+    stop("`skill` must be a data.frame from et_skill_score() (with a ",
+         "'skillful' column) or a logical vector.")
+  }
+}
+
+# Principled default response scale: the observed range of the training
+# response. Documented and reproducible, unlike an arbitrary user number.
+.default_response_scale <- function(predictions) {
+  model <- predictions$model
+  rc <- tryCatch(.resolve_response_col(NULL, model), error = function(e) NULL)
+  if (!is.null(rc) && !is.null(model$data) && rc %in% colnames(model$data)) {
+    rng <- range(model$data[[rc]], na.rm = TRUE)
+    if (is.finite(diff(rng)) && diff(rng) > 1e-12) return(rng)
+  }
+  stop("response_scale not supplied and could not be derived from the model's ",
+       "training data; please supply response_scale = c(min, max).")
 }
 
 # ******************************************************************************

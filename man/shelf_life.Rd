@@ -6,10 +6,11 @@
 \usage{
 shelf_life(
   predictions,
-  response_scale,
+  response_scale = NULL,
   ci_level = 0.9,
   threshold = 1,
   time_col = NULL,
+  skill = NULL,
   min_slope_for_projection = 1e-04,
   max_extrapolation_factor = 10,
   ...,
@@ -21,9 +22,10 @@ shelf_life(
 
 \item{response_scale}{Numeric vector of length 2 (\code{c(min, max)})
 giving the response scale used as the denominator in the
-CI-width / range ratio.  For unbounded responses use
-\code{range(training_data$response)} as a conservative default, or
-supply a biologically motivated interval.
+CI-width / range ratio.  Supply a biologically motivated interval when
+one exists.  When \code{NULL} (default), the observed range of the
+\strong{training response} is used as a documented, reproducible default
+(with an informational message) instead of an arbitrary number.
 The effective range is \code{diff(response_scale)}.}
 
 \item{ci_level}{Numeric.  The credible interval level to use (default
@@ -35,6 +37,13 @@ forecast is uninformative (default 1.0).}
 \item{time_col}{Character.  Optional column in
 \code{predictions$newdata} to use as the time axis.  If \code{NULL},
 observation index is used.}
+
+\item{skill}{Optional skill gate.  A \code{data.frame} returned by
+\code{\link{et_skill_score}} (positionally matched to the forecast rows;
+its \code{skillful} column is used) or a bare logical vector.  When
+supplied, a forecast period is \code{informative} only if it is both
+precise \emph{and} skillful, so a precise-but-biased forecast does not
+pass.  When \code{NULL} (default) the precision criterion is used alone.}
 
 \item{min_slope_for_projection}{Numeric.  Minimum linear slope (of
 ratio vs.\ time) required to attempt extrapolation when all periods
@@ -80,6 +89,17 @@ width of credible intervals to a response scale.  A forecast is
 uninformative when its CI width exceeds \code{threshold * response_scale}.
 }
 \details{
+Shelf life is a \strong{precision} criterion on the response scale --- a
+deliberate \emph{complement} to accuracy-relative forecast limits (Petchey
+et al. 2015; Wesselkamp et al. 2025), not a replacement.  It answers "when do
+the error bars get too wide to act on?", whereas a forecast limit answers
+"when does the model stop beating a null?".  Because a forecast can be
+precise yet biased, pass a \code{skill} table from \code{\link{et_skill_score}}
+to \strong{gate} the shelf life on skill: a period then counts as
+informative only if it is both precise \emph{and} beats the null model.  This
+couples the two views and prevents a precise-but-biased forecast from
+silently passing.
+
 The function operates in three modes depending on the available data and
 whether the uninformative threshold is crossed within the forecast window:
 
