@@ -44,6 +44,18 @@ with the uncertainty-budget consistency of the decomposition.
   effect there. The `et_prior_spec` object and its `print()` method now report
   the shrinkage mode.
 
+## Documentation & robustness
+
+* **Scope honesty and a convergence nudge (T8).** `et_fit()` now documents its
+  boundary plainly (a thin `brms` wrapper; the decomposition of hierarchical
+  fits is provisional pending a group-variance term, and `grouping=` fits
+  independent per-group models rather than one multilevel model), and emits a
+  warning on high Rhat / divergent transitions pointing to `et_diagnose()`
+  before prediction. `extract_priors.ranger()` is documented and flagged
+  (advisory) as \strong{experimental}: random-forest importance has no sign or
+  GLM-coefficient scale, so its importance→prior-SD mapping is heuristic —
+  prefer `glmnet`/`lm`/`glm` for a principled prior.
+
 ## Bug fixes
 
 * **AR/MA forecast variance now accumulates with lead time (T3).** For
@@ -75,6 +87,16 @@ with the uncertainty-budget consistency of the decomposition.
   warning. It will be removed in a future release.
 
 ## New features
+
+* **Optional global (Sobol) variance decomposition (T7).** New `et_sobol()`
+  provides an order-independent alternative to the additive budget: a
+  variance-based decomposition of the predictive mean into first-order
+  \strong{parameter} and \strong{environmental} Sobol indices plus their
+  \strong{interaction} (Saltelli 2010 / Jansen estimators, with output
+  centring for Monte Carlo stability). The fast additive budget remains the
+  default; `et_sobol()` is for the general case where a non-linear link or
+  correlated drivers make the parameter\eqn{\times}driver interaction
+  non-negligible, which the sequential additive split folds into its terms.
 
 * **Null-model forecast skill + shelf-life skill gate (T6).** New
   `et_skill_score()` scores a forecast against a null model — a random walk
