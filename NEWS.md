@@ -73,6 +73,24 @@ with the uncertainty-budget consistency of the decomposition.
   responses are always treated as unknown, so passing a hindcast's observed
   future values no longer leaks them into the interval.
 
+* **The AR/temporal decomposition is now tail-robust and consistent with the
+  reported interval.** Two follow-on fixes to the autocorrelation forecast
+  above. (i) `et_predict()` built the credible-interval / PIT / calibration
+  draws (`predictive_draws`) from only the first `n_perturb` posterior draws
+  while the variance decomposition used all `n_draws`, so the interval and the
+  decomposition could describe different samples; the env-inflated predictive
+  now spans all `n_draws` draws (the env perturbation is recycled across them).
+  (ii) `temporal_var` (and hence `total_var`) is computed from a **winsorized**
+  posterior-predictive variance, so that when the AR coefficient's posterior has
+  mass at \eqn{|\phi| \ge 1} a handful of explosive, non-stationary draws can no
+  longer dominate the estimate. Previously a single near-unit-root draw could
+  inflate the raw variance by an order of magnitude and make `temporal_var`
+  disagree wildly with the (quantile-based, tail-robust) credible interval
+  reported alongside it. The decomposition now tracks that interval; a genuinely
+  non-stationary AR posterior still yields a large temporal share. `et_predict()`
+  emits a heads-up when the raw predictive variance greatly exceeds its robust
+  value (the near-unit-root regime), pointing to `et_diagnose()`.
+
 * `et_predict()` caps `n_draws` at the number of draws in the fit (with a
   warning) instead of erroring, and now uses a shared, explicit set of draw
   ids across `posterior_predict()` and `posterior_linpred()` so the two are

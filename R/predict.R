@@ -789,10 +789,43 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # pp           : [n_draws  x n_obs] unperturbed posterior predictive draws
 # mu_draws     : [n_draws  x n_obs] unperturbed response-scale means
 .inflate_env_predictive <- function(mu_perturbed, pp, mu_draws) {
-  n_p   <- nrow(mu_perturbed)
-  resid <- pp[seq_len(n_p), , drop = FALSE] -
-           mu_draws[seq_len(n_p), , drop = FALSE]
-  mu_perturbed + resid
+  n_draws <- nrow(pp)
+  n_p     <- nrow(mu_perturbed)
+  # Recycle the env perturbation across ALL posterior draws so the returned
+  # predictive draws cover the same n_draws as pp (and hence the same draws the
+  # variance decomposition uses). Env perturbations are iid and exchangeable, so
+  # recycling the pattern is valid, and the first n_p rows are unchanged.
+  # Without this the interval / PIT / calibration would use only the first
+  # n_perturb draws while the decomposition uses all n_draws -- an inconsistency
+  # that is acute for autocorrelation forecasts whose far-lead draws are
+  # heavy-tailed (a few near-non-stationary draws dominate the full sample but
+  # not the truncated one).
+  idx   <- rep_len(seq_len(n_p), n_draws)
+  resid <- pp - mu_draws
+  mu_perturbed[idx, , drop = FALSE] + resid
+}
+
+# Tail-robust (winsorized) column variance. Each column is clipped to its
+# [trim, 1 - trim] quantiles before var() is taken, so a handful of extreme
+# draws cannot dominate the estimate. This matters for the posterior-predictive
+# variance of an autocorrelation forecast: when the AR coefficient's posterior
+# has mass at |phi| >= 1, the k-step-ahead forecast variance is heavy-tailed and
+# a single non-stationary draw can inflate the raw variance by an order of
+# magnitude, while the quantile-based credible interval (which the forecast
+# actually reports) is unaffected. Winsorizing yields a spread consistent with
+# that interval. The default trim = 0.01 clips the outer 1% of draws per side:
+# enough to remove the single-draw domination of a spurious near-non-stationary
+# tail (e.g. one |phi| >= 1 draw in a mostly-stationary posterior), while leaving
+# genuine non-stationary posterior mass visible (a species whose AR posterior is
+# truly explosive still gets a large temporal variance). For a well-behaved
+# column the winsorized variance is within ~5% of the raw variance.
+.robust_col_var <- function(mat, trim = 0.01) {
+  if (trim <= 0) return(apply(mat, 2, stats::var))
+  apply(mat, 2, function(col) {
+    qs <- stats::quantile(col, probs = c(trim, 1 - trim),
+                          names = FALSE, na.rm = TRUE)
+    stats::var(pmin(pmax(col, qs[1]), qs[2]))
+  })
 }
 
 # Build credible interval data.frame from posterior predictive matrix.
@@ -874,15 +907,21 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   # spread is captured in temporal_var below.
   residual_var <- .family_residual_var(family, mu_draws, disp_draws)
 
-  # Sampled posterior-predictive variance on the UNPERTURBED predictors.
-  # By the law of total variance this equals param_var + residual_var for iid
-  # models (up to Monte Carlo error) and additionally contains the AR/MA/ARMA
-  # accumulation for autocorrelation models (brms forecasts iteratively). It
-  # does NOT contain env_var, which arises only from perturbing the predictors.
-  pp_var <- apply(pp, 2, stats::var)
+  # Sampled posterior-predictive variance on the UNPERTURBED predictors, taken
+  # tail-robustly (winsorized). By the law of total variance this equals
+  # param_var + residual_var for iid models (up to Monte Carlo error) and
+  # additionally contains the AR/MA/ARMA accumulation for autocorrelation models
+  # (brms forecasts iteratively). It does NOT contain env_var, which arises only
+  # from perturbing the predictors. The winsorization matters only for the
+  # autocorrelation branch: a near-non-stationary AR posterior makes the far-lead
+  # forecast variance heavy-tailed, so a raw var() would be dominated by a few
+  # |phi| >= 1 draws and disagree with the quantile credible interval; the robust
+  # estimate stays consistent with the reported interval (see .robust_col_var).
+  pp_var_raw <- apply(pp, 2, stats::var)
+  pp_var     <- .robust_col_var(pp)
 
   if (isTRUE(has_autocor)) {
-    # Temporal (autocorrelation-induced) variance: the excess of the sampled
+    # Temporal (autocorrelation-induced) variance: the excess of the (robust)
     # posterior-predictive variance over the iid-equivalent (param + residual)
     # sum. For Gaussian AR(p) this is the autocorrelated accumulation of
     # innovations beyond a single sigma^2; for ARMA / MA / cosy() / sar() /
@@ -897,6 +936,23 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     # total as the component sum makes the budget reconcile EXACTLY (law of
     # total variance), so the reported percentage shares sum to 100%.
     total_var <- param_var + env_var + residual_var + temporal_var
+    # Heads-up when the AR forecast variance is heavy-tailed (near / above the
+    # unit root): the raw predictive variance greatly exceeds its winsorized
+    # value, so the point forecast becomes uninformative faster than the robust
+    # interval suggests. The reported components use the robust estimate.
+    # Compare the mean raw vs mean robust predictive variance (mean, not max,
+    # so a single explosive draw in one row does not by itself trip the flag).
+    tail_ratio <- mean(pp_var_raw, na.rm = TRUE) /
+                  max(mean(pp_var, na.rm = TRUE), .Machine$double.eps)
+    if (is.finite(tail_ratio) && tail_ratio > 3) {
+      .et_warn("Autocorrelation forecast variance is heavy-tailed (raw / robust ",
+               "predictive variance up to ", round(tail_ratio, 1), "x): the AR ",
+               "coefficient's posterior has mass near or above the unit root, so ",
+               "a few non-stationary draws inflate the raw variance. Reported ",
+               "temporal_var / total_var use the tail-robust estimate, consistent ",
+               "with the quantile credible interval; treat long-lead point ",
+               "forecasts with caution and see et_diagnose().")
+    }
   } else {
     temporal_var <- NULL
     # iid: total variance is the exact law-of-total-variance sum. Using the
