@@ -223,6 +223,29 @@ test_that("env_ensemble makes driver variance grow with lead time", {
   expect_equal(pr$env_ensemble$n_scenarios, M)
 })
 
+# ── Global Sobol sensitivity (T7) ────────────────────────────────────────────
+
+test_that("et_sobol returns a coherent variance-based decomposition", {
+  pred <- suppressWarnings(et_predict(
+    .int_fit, .int_valid, env_noise = list(x1 = 0.3, x2 = 0.2), n_draws = 200L
+  ))
+  so <- et_sobol(pred, n_sobol = 600L, seed = 1L)
+
+  expect_true(all(c("S_param", "S_env", "ST_param", "ST_env",
+                    "interaction", "var_mu", "residual_var") %in% names(so)))
+  # First-order + interaction identity is exact by construction
+  expect_equal(so$S_param + so$S_env + so$interaction, rep(1, nrow(so)),
+               tolerance = 1e-8)
+  # var_mu is the same quantity as the additive param + env variance
+  dec <- decompose_uncertainty(pred)
+  rel <- abs(so$var_mu - (dec$param_var + dec$env_var)) /
+         pmax(dec$param_var + dec$env_var, 1e-8)
+  expect_lt(max(rel), 0.3)          # loose: n_draws / n_sobol are small here
+  # Needs a non-zero env_noise to define the environmental factor
+  pred0 <- suppressWarnings(et_predict(.int_fit, .int_valid, n_draws = 200L))
+  expect_error(et_sobol(pred0), "non-zero env_noise")
+})
+
 # ── et_fit with lm prior (default method path) ───────────────────────────────
 
 test_that("et_fit works with flat (NULL) priors", {

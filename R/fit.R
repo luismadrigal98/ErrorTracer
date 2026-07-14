@@ -9,8 +9,34 @@
 #' Wraps \code{brms::brm()} and attaches the prior specification,
 #' training data reference, and configuration for downstream uncertainty
 #' decomposition.  Pass \code{priors} from \code{\link{extract_priors}} to
-#' use regularized-model coefficients as prior means; omit it for
-#' default (weakly informative) priors.
+#' use regularized-model coefficients to set the prior scale (and, with
+#' \code{shrinkage = "estimate"}, the prior mean); omit it for default
+#' (weakly informative) priors.
+#'
+#' @section Scope and limitations:
+#' \code{et_fit()} is deliberately a \strong{thin wrapper around \code{brms}}:
+#' the formula, family, and any autocorrelation term (\code{ar()}/\code{ma()}/
+#' \code{arma()}/...) are passed straight through, so ErrorTracer inherits
+#' \code{brms}'s modelling scope and its Stan back-end. The added value is the
+#' prior pipeline, the structured uncertainty decomposition, forecast skill /
+#' shelf life, and calibration diagnostics --- not new model classes.
+#'
+#' Two boundaries to keep in mind:
+#' \itemize{
+#'   \item \strong{Hierarchical / random-effects models} fit through the
+#'     formula (\code{y ~ x + (x | group)}), but the current decomposition does
+#'     \emph{not} yet split out a group-level variance component, and it does
+#'     not distinguish in-sample prediction (using group-specific parameters)
+#'     from out-of-sample prediction (integrating over the group level). Treat
+#'     the decomposition of hierarchical fits as provisional until a dedicated
+#'     group-variance term is added. The \code{grouping} argument here is a
+#'     \emph{separate} device: it fits one independent model per group (no
+#'     pooling), not a single multilevel model.
+#'   \item \strong{Convergence is your responsibility.} \code{et_fit()} emits a
+#'     warning on high Rhat or divergent transitions, but you should inspect
+#'     \code{\link{et_diagnose}} before predicting; the defaults
+#'     (\code{iter = 2000}, 4 chains) are a starting point, not a guarantee.
+#' }
 #'
 #' @param formula An R formula, e.g.\ \code{response ~ .} or
 #'   \code{y ~ x1 + x2}.
@@ -210,6 +236,10 @@ et_fit <- function(formula,
     ...
   )
 
+  # Convergence nudge: a quick Rhat / divergence check so the user is warned
+  # BEFORE predicting (Stage 3). Full diagnostics live in et_diagnose().
+  .et_check_convergence(fit)
+
   structure(
     list(
       fit = fit,
@@ -224,6 +254,33 @@ et_fit <- function(formula,
     ),
     class = "et_model"
   )
+}
+
+# Lightweight post-fit convergence nudge. Warns (never stops) on high Rhat or
+# divergent transitions and points the user to et_diagnose() before Stage 3.
+.et_check_convergence <- function(fit) {
+  info <- tryCatch({
+    rh   <- suppressWarnings(brms::rhat(fit))
+    nuts <- tryCatch(brms::nuts_params(fit), error = function(e) NULL)
+    divs <- if (!is.null(nuts))
+      sum(nuts$Value[nuts$Parameter == "divergent__"], na.rm = TRUE) else 0
+    list(max_rh = max(rh, na.rm = TRUE), divs = divs)
+  }, error = function(e) NULL)
+  if (is.null(info)) return(invisible())
+
+  msgs <- character(0)
+  if (is.finite(info$max_rh) && info$max_rh > 1.05) {
+    msgs <- c(msgs, sprintf("max Rhat = %.3f (> 1.05)", info$max_rh))
+  }
+  if (info$divs > 0) {
+    msgs <- c(msgs, sprintf("%d divergent transition(s)", info$divs))
+  }
+  if (length(msgs)) {
+    .et_warn("Convergence warning: ", paste(msgs, collapse = "; "),
+             ". Inspect with et_diagnose() and consider more iterations or a ",
+             "higher adapt_delta BEFORE predicting (Stage 3).")
+  }
+  invisible()
 }
 
 # ******************************************************************************

@@ -221,17 +221,24 @@ extract_priors.glmnet <- function(model, multiplier = 2.0, min_sd = 0.1,
 
 #' @rdname extract_priors
 #' @details
-#' For \code{ranger} models, signed coefficients are not available.  Priors
-#' are centred at zero (direction unknown) and the prior SD for each predictor
-#' is set to \code{multiplier * importance_normalised}, where importance is
-#' normalised to the \code{[min_sd, 1]} interval.  Only variables with
-#' positive permutation importance are included.
+#' \strong{The \code{ranger} path is experimental.} Random-forest permutation
+#' importance has no sign and no natural scale in the units of a GLM
+#' coefficient, so the mapping used here --- priors centred at zero with SD set
+#' to \code{multiplier * importance_normalised} (importance normalised to
+#' \code{[min_sd, 1]}; only variables with positive importance retained) --- is
+#' a heuristic, not a calibrated correspondence.  It is offered for exploratory
+#' feature screening only; for a principled prior prefer \code{glmnet}/
+#' \code{lm}/\code{glm}, whose coefficients are on the model's scale.  A signed
+#' importance (e.g. from SHAP values) would be needed to inform the prior mean.
 #' @export
 extract_priors.ranger <- function(model, multiplier = 2.0, min_sd = 0.1,
                                    shrinkage = c("zero", "estimate"),
                                    intercept_prior_sd = NULL,
                                    sigma_prior_scale = 1.0, ...) {
   shrinkage <- match.arg(shrinkage)  # ranger priors are always mean-0
+  .et_warn("extract_priors.ranger() is experimental: random-forest importance ",
+           "has no sign or GLM-coefficient scale, so the importance -> prior-SD ",
+           "mapping is heuristic. Prefer glmnet/lm/glm for a principled prior.")
   if (!requireNamespace("ranger", quietly = TRUE)) {
     stop("Package 'ranger' is required for extract_priors.ranger().")
   }

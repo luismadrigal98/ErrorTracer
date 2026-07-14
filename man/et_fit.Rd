@@ -80,9 +80,37 @@ An \code{et_model} object (or an \code{et_model_list} if
 Wraps \code{brms::brm()} and attaches the prior specification,
 training data reference, and configuration for downstream uncertainty
 decomposition.  Pass \code{priors} from \code{\link{extract_priors}} to
-use regularized-model coefficients as prior means; omit it for
-default (weakly informative) priors.
+use regularized-model coefficients to set the prior scale (and, with
+\code{shrinkage = "estimate"}, the prior mean); omit it for default
+(weakly informative) priors.
 }
+\section{Scope and limitations}{
+
+\code{et_fit()} is deliberately a \strong{thin wrapper around \code{brms}}:
+the formula, family, and any autocorrelation term (\code{ar()}/\code{ma()}/
+\code{arma()}/...) are passed straight through, so ErrorTracer inherits
+\code{brms}'s modelling scope and its Stan back-end. The added value is the
+prior pipeline, the structured uncertainty decomposition, forecast skill /
+shelf life, and calibration diagnostics --- not new model classes.
+
+Two boundaries to keep in mind:
+\itemize{
+  \item \strong{Hierarchical / random-effects models} fit through the
+    formula (\code{y ~ x + (x | group)}), but the current decomposition does
+    \emph{not} yet split out a group-level variance component, and it does
+    not distinguish in-sample prediction (using group-specific parameters)
+    from out-of-sample prediction (integrating over the group level). Treat
+    the decomposition of hierarchical fits as provisional until a dedicated
+    group-variance term is added. The \code{grouping} argument here is a
+    \emph{separate} device: it fits one independent model per group (no
+    pooling), not a single multilevel model.
+  \item \strong{Convergence is your responsibility.} \code{et_fit()} emits a
+    warning on high Rhat or divergent transitions, but you should inspect
+    \code{\link{et_diagnose}} before predicting; the defaults
+    (\code{iter = 2000}, 4 chains) are a starting point, not a guarantee.
+}
+}
+
 \examples{
 \donttest{
 set.seed(1)
