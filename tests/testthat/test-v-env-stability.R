@@ -252,3 +252,55 @@ test_that("a small but resolvable env_var is still reported (tolerance not too w
 
   expect_true(all(d$v_env_mcse > 0))
 })
+
+# ---------------------------------------------------------------------------
+# Property test: architecture-independence by ULP injection.
+#
+# We cannot run the CRAN aarch64 flavours here, and R exposes no runtime switch
+# for floating-point semantics (capabilities("long.double") is fixed when R is
+# built). But the architecture dependence we care about reduces to a single
+# observable: the two column-variance reductions may differ in their last bits.
+# Injecting that difference directly is hardware-free AND strictly stronger than
+# running on one aarch64 machine, because it samples the whole neighbourhood of
+# possible divergences rather than the one a given CPU happens to produce.
+#
+# Invariant: when the perturbed and unperturbed draws are the same sample up to
+# ULP-scale noise, env_var and v_env_mcse must be exactly zero -- at every
+# response scale, sample size and observation count.
+# ---------------------------------------------------------------------------
+
+test_that("zero-env detection is invariant to ULP-scale divergence (property)", {
+  set.seed(20260718)
+  gf <- list(family = "gaussian", link = "identity", linkinv = identity)
+
+  for (i in seq_len(100)) {
+    n_draws <- sample(c(50L, 100L, 200L), 1L)
+    n_obs   <- sample(2:6, 1L)
+    # Vary the response scale over six orders of magnitude: a correct
+    # implementation must not have a scale-dependent absolute threshold.
+    mu   <- matrix(rnorm(n_draws * n_obs, sd = 10^runif(1, -3, 3)),
+                   nrow = n_draws)
+    pp   <- matrix(rnorm(n_draws * n_obs), nrow = n_draws)
+    disp <- list(sigma = abs(rnorm(n_draws, 0.5)),
+                 phi = NULL, shape = NULL, nu = NULL)
+
+    # A few ULPs in either direction, per element -- what a different
+    # architecture, BLAS or reduction order would produce.
+    jitter <- matrix(1 + sample(-4:4, n_draws * n_obs, replace = TRUE) *
+                       .Machine$double.eps, nrow = n_draws)
+
+    d <- ErrorTracer:::.decompose_from_arrays(
+      pp           = pp,
+      mu_draws     = mu,
+      mu_perturbed = mu * jitter,
+      mu_draws_sub = mu,
+      family       = gf,
+      disp_draws   = disp
+    )
+
+    expect_true(all(d$env_var    == 0),
+                label = paste0("env_var zero at iteration ", i))
+    expect_true(all(d$v_env_mcse == 0),
+                label = paste0("v_env_mcse zero at iteration ", i))
+  }
+})
