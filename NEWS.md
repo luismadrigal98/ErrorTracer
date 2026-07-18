@@ -1,4 +1,20 @@
-# ErrorTracer 1.2.0 (development)
+# ErrorTracer 1.2.1
+
+* **Fix: platform-dependent `v_env_mcse` on aarch64 (macOS arm64).** This is
+  the failure that caused the CRAN archival on 2026-06-08.
+  `decompose_uncertainty()` detected the "no environmental noise" case by
+  testing the variance difference `v_env_raw == 0` exactly, and it computed the
+  two column variances with different `stats::var()` `na.rm` settings. Those
+  settings select different C code paths in `cov.c`, which round identically on
+  x86_64 but not on aarch64. A last-bit difference therefore flipped the
+  reported Monte Carlo SE of `env_var` from `0` to a large value (0.20 in the
+  CRAN log) when `env_noise = 0`. The two variances are now computed the same
+  way, and the zero test uses a relative tolerance instead of exact equality,
+  so the result no longer depends on bit-level floating-point reproducibility.
+  `env_var` itself was already correct to within 1e-10; only its Monte Carlo SE
+  was affected. Regression tests added.
+
+# ErrorTracer 1.2.0
 
 This release addresses the correctness issues raised in peer review, starting
 with the uncertainty-budget consistency of the decomposition.

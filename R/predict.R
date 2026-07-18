@@ -885,18 +885,38 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   param_var <- apply(mu_draws, 2, stats::var)
 
   # Environmental variance: subtraction estimator on the response scale.
-  v_perturbed <- apply(mu_perturbed,   2, stats::var, na.rm = TRUE)
-  v_param_sub <- apply(mu_draws_sub,   2, stats::var)
+  # Both column variances must be computed the SAME way: stats::var() dispatches
+  # on na.rm to a different C code path in cov.c ("na.or.complete" vs
+  # "everything"), and those two paths are not guaranteed to be bit-identical on
+  # every platform (they are on x86_64, but not on aarch64). An asymmetric call
+  # would make the difference below nonzero in the last bits even when the two
+  # matrices are the same sample.
+  v_perturbed <- apply(mu_perturbed, 2, stats::var, na.rm = TRUE)
+  v_param_sub <- apply(mu_draws_sub, 2, stats::var, na.rm = TRUE)
   v_env_raw   <- v_perturbed - v_param_sub
-  env_var     <- pmax(v_env_raw, 0)
+
+  # When there is no environmental noise the two matrices are the same sample
+  # (all_zero_noise path), so v_env_raw is 0 in exact arithmetic. Floating-point
+  # summation is not bit-reproducible across platforms/BLAS, so test against a
+  # relative tolerance rather than == 0. The threshold (sqrt(machine epsilon),
+  # the all.equal() convention) is many orders of magnitude below anything the
+  # subtraction estimator could resolve: its own Monte Carlo error is
+  # O(var * sqrt(2 / n_p)), so an env share this small is numerically
+  # indistinguishable from zero and is reported as zero.
+  zero_tol <- sqrt(.Machine$double.eps) * pmax(v_perturbed, v_param_sub, 0)
+  is_zero  <- !is.na(v_env_raw) & abs(v_env_raw) <= zero_tol
+
+  env_var           <- pmax(v_env_raw, 0)
+  env_var[is_zero]  <- 0
 
   # Monte Carlo SE of env_var.
   # Uses the chi-squared approximation SE(Var) ~= Var * sqrt(2 / (n - 1)).
-  # When v_env_raw == 0 exactly the two matrices are from the same sample
-  # (all_zero_noise path); env_var = 0 by construction, so SE = 0.
+  # Exactly zero on the no-noise path (env_var = 0 by construction); still
+  # reported when v_env_raw is negative, since there the SE is what tells the
+  # user the estimate is Monte Carlo noise.
   f_se       <- sqrt(2 / max(n_p - 1, 1))
   v_env_mcse <- ifelse(
-    v_env_raw == 0,
+    is_zero,
     0,
     sqrt((v_perturbed * f_se)^2 + (v_param_sub * f_se)^2)
   )
