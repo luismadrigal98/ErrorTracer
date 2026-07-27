@@ -164,6 +164,23 @@
 #'   \strong{auto}: env is folded in whenever the caller supplied non-zero
 #'   \code{env_noise}, and omitted otherwise.  Pass \code{FALSE} to force a
 #'   parameter + residual interval even when \code{env_noise} is given.
+#' @param var_trim Numeric in \eqn{[0, 0.5)}, default \code{0}.  Winsorization
+#'   applied when computing \emph{every} variance channel of the decomposition:
+#'   each column of draws is clipped to its
+#'   \eqn{[\code{var\_trim},\, 1 - \code{var\_trim}]} quantiles before
+#'   \code{var()}.  The default \code{0} is the plain sample variance, so the
+#'   reported budget describes exactly the distribution the quantile credible
+#'   interval is drawn from.  A non-zero value trades that coherence for
+#'   robustness against a heavy-tailed predictive distribution, and is applied
+#'   uniformly across \code{param_var}, \code{env_var}, the posterior-predictive
+#'   variance and hence \code{temporal_var} — never to one channel only, which
+#'   would bias their differences.
+#'
+#'   Winsorizing is \strong{not} the right remedy for a near-unit-root
+#'   autocorrelation posterior: it masks a diverging forecast variance rather
+#'   than fixing it, and leaves the budget describing a different distribution
+#'   from the interval.  Prefer a stationarity-respecting prior at fit time
+#'   (\code{\link{et_fit}(ar_prior = "stationary")}).
 #' @param ... Passed to methods.
 #'
 #' @return An \code{et_prediction} object (list) containing:
@@ -202,7 +219,7 @@ et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
                         n_perturb = NULL,
                         n_env_draws = 1L,
                         interval_type = c("predictive", "linpred"),
-                        include_env_in_ci = NULL, ...) {
+                        include_env_in_ci = NULL, var_trim = 0, ...) {
   UseMethod("et_predict")
 }
 
@@ -221,9 +238,14 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   n_env_draws = 1L,
                                   interval_type = c("predictive", "linpred"),
                                   include_env_in_ci = NULL,
+                                  var_trim = 0,
                                   ...) {
 
   interval_type <- match.arg(interval_type)
+  if (!is.numeric(var_trim) || length(var_trim) != 1L ||
+      is.na(var_trim) || var_trim < 0 || var_trim >= 0.5) {
+    stop("var_trim must be a single number in [0, 0.5).")
+  }
   n_env_draws   <- max(1L, as.integer(n_env_draws))
   fit           <- model$fit
   pred_names    <- .brms_pred_names(fit)
@@ -435,7 +457,8 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
     mu_draws_sub = mu_draws_sub,
     family       = fit$family,
     disp_draws   = disp_draws,
-    has_autocor  = has_autocor
+    has_autocor  = has_autocor,
+    var_trim     = var_trim
   )
 
   structure(
@@ -479,6 +502,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       n_env_draws = 1L,
                                       interval_type = c("predictive", "linpred"),
                                       include_env_in_ci = NULL,
+                                      var_trim = 0,
                                       ...) {
   interval_type <- match.arg(interval_type)
 
@@ -517,6 +541,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
         n_env_draws       = n_env_draws,
         interval_type     = interval_type,
         include_env_in_ci = include_env_in_ci,
+        var_trim          = var_trim,
         ...
       ),
       error = function(e) {
@@ -837,12 +862,20 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # genuine non-stationary posterior mass visible (a species whose AR posterior is
 # truly explosive still gets a large temporal variance). For a well-behaved
 # column the winsorized variance is within ~5% of the raw variance.
-.robust_col_var <- function(mat, trim = 0.01) {
-  if (trim <= 0) return(apply(mat, 2, stats::var))
+.robust_col_var <- function(mat, trim = 0) {
+  # na.rm = TRUE on BOTH branches. This is deliberate and load-bearing: v1.2.1
+  # was archived from CRAN because v_perturbed and v_param_sub were computed
+  # with different na.rm settings, which select different C code paths in
+  # cov.c ("na.or.complete" vs "everything") that do not round identically on
+  # aarch64. Every caller now routes through this one function, so the two
+  # variances are literally the same call — keep it that way.
+  if (trim <= 0) {
+    return(apply(mat, 2, stats::var, na.rm = TRUE))
+  }
   apply(mat, 2, function(col) {
     qs <- stats::quantile(col, probs = c(trim, 1 - trim),
                           names = FALSE, na.rm = TRUE)
-    stats::var(pmin(pmax(col, qs[1]), qs[2]))
+    stats::var(pmin(pmax(col, qs[1]), qs[2]), na.rm = TRUE)
   })
 }
 
@@ -895,12 +928,21 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 #                AR/MA/ARMA-induced predictive variance beyond the iid sum.
 .decompose_from_arrays <- function(pp, mu_draws, mu_perturbed, mu_draws_sub,
                                     family, disp_draws,
-                                    has_autocor = FALSE) {
+                                    has_autocor = FALSE, var_trim = 0) {
   n_obs <- ncol(pp)
   n_p   <- nrow(mu_perturbed)
 
+  # ONE variance estimator for every channel. Previously pp_var was winsorized
+  # while param_var / the env pair were raw, so temporal_var was a difference
+  # between two different estimators — biased low by whatever the winsorization
+  # removed (~3.6% for a Gaussian at trim = 0.01), which blinded it to genuine
+  # AR shares below that. With var_trim = 0 (the default) this is the plain
+  # sample variance, so the budget describes exactly the distribution the
+  # quantile credible interval is drawn from.
+  col_var <- function(m) .robust_col_var(m, trim = var_trim)
+
   # Parameter uncertainty: variance of the response-scale posterior mean.
-  param_var <- apply(mu_draws, 2, stats::var)
+  param_var <- col_var(mu_draws)
 
   # Environmental variance: subtraction estimator on the response scale.
   # Both column variances must be computed the SAME way: stats::var() dispatches
@@ -909,8 +951,8 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   # every platform (they are on x86_64, but not on aarch64). An asymmetric call
   # would make the difference below nonzero in the last bits even when the two
   # matrices are the same sample.
-  v_perturbed <- apply(mu_perturbed, 2, stats::var, na.rm = TRUE)
-  v_param_sub <- apply(mu_draws_sub, 2, stats::var, na.rm = TRUE)
+  v_perturbed <- col_var(mu_perturbed)
+  v_param_sub <- col_var(mu_draws_sub)
   v_env_raw   <- v_perturbed - v_param_sub
 
   # When there is no environmental noise the two matrices are the same sample
@@ -975,13 +1017,10 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   # param_var + residual_var for iid models (up to Monte Carlo error) and
   # additionally contains the AR/MA/ARMA accumulation for autocorrelation models
   # (brms forecasts iteratively). It does NOT contain env_var, which arises only
-  # from perturbing the predictors. The winsorization matters only for the
-  # autocorrelation branch: a near-non-stationary AR posterior makes the far-lead
-  # forecast variance heavy-tailed, so a raw var() would be dominated by a few
-  # |phi| >= 1 draws and disagree with the quantile credible interval; the robust
-  # estimate stays consistent with the reported interval (see .robust_col_var).
+  # from perturbing the predictors. Uses the SAME estimator as every other
+  # channel (see col_var above), so temporal_var is a like-for-like difference.
   pp_var_raw <- apply(pp, 2, stats::var)
-  pp_var     <- .robust_col_var(pp)
+  pp_var     <- col_var(pp)
 
   if (isTRUE(has_autocor)) {
     # Temporal (autocorrelation-induced) variance: the excess of the (robust)
@@ -999,22 +1038,25 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     # total as the component sum makes the budget reconcile EXACTLY (law of
     # total variance), so the reported percentage shares sum to 100%.
     total_var <- param_var + env_var + residual_var + temporal_var
-    # Heads-up when the AR forecast variance is heavy-tailed (near / above the
-    # unit root): the raw predictive variance greatly exceeds its winsorized
-    # value, so the point forecast becomes uninformative faster than the robust
-    # interval suggests. The reported components use the robust estimate.
-    # Compare the mean raw vs mean robust predictive variance (mean, not max,
-    # so a single explosive draw in one row does not by itself trip the flag).
+    # Tail diagnostic. Computed against a fixed 1% winsorized reference
+    # REGARDLESS of var_trim, because it is a statement about the model (is the
+    # AR posterior near the unit root?), not about the estimator in use. The
+    # honest remedy is a stationarity-respecting prior at fit time
+    # (et_fit(ar_prior = ...)), not a robust summary of a divergent predictive
+    # distribution: on a near-unit-root fixture the ratio falls from ~1073x under
+    # brms's flat ar prior to ~1.7x under the weakly-informative default.
+    tail_ref   <- .robust_col_var(pp, trim = 0.01)
     tail_ratio <- mean(pp_var_raw, na.rm = TRUE) /
-                  max(mean(pp_var, na.rm = TRUE), .Machine$double.eps)
+                  max(mean(tail_ref, na.rm = TRUE), .Machine$double.eps)
     if (is.finite(tail_ratio) && tail_ratio > 3) {
-      .et_warn("Autocorrelation forecast variance is heavy-tailed (raw / robust ",
-               "predictive variance up to ", round(tail_ratio, 1), "x): the AR ",
-               "coefficient's posterior has mass near or above the unit root, so ",
-               "a few non-stationary draws inflate the raw variance. Reported ",
-               "temporal_var / total_var use the tail-robust estimate, consistent ",
-               "with the quantile credible interval; treat long-lead point ",
-               "forecasts with caution and see et_diagnose().")
+      .et_warn("Autocorrelation forecast variance is heavy-tailed (raw vs 1% ",
+               "winsorized predictive variance = ", round(tail_ratio, 1), "x): ",
+               "the AR coefficient's posterior has mass near or above the unit ",
+               "root, so the k-step forecast variance is diverging. Treat ",
+               "long-lead intervals, temporal_var and shelf_life() as 'no usable ",
+               "horizon' rather than as calibrated numbers. Prefer refitting with ",
+               "et_fit(ar_prior = 'stationary') over masking the tail; see also ",
+               "et_diagnose().")
     }
   } else {
     temporal_var <- NULL

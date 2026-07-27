@@ -44,6 +44,53 @@
   count, so small prediction sets (where a floored row genuinely is jitter) do
   not trip it.
 
+## Autocorrelation priors — treating the cause rather than the tail
+
+* **`et_fit()` gains `ar_prior`, defaulting to `"weakly_informative"`.** `brms`
+  places a *flat, unbounded* prior on `class = "ar"` / `"ma"`
+  (`get_prior()` reports `(flat)` with no `lb`/`ub`), so nothing keeps the
+  residual process inside the stationary region. On the short series typical of
+  ecological panels the posterior routinely straddles the unit root, and the
+  k-step forecast variance `sigma^2 (1 - phi^(2k)) / (1 - phi^2)` then diverges.
+  The new default `normal(0, 0.5)` places ~95% of the prior mass inside
+  `(-1, 1)` without hard-bounding, so a genuinely non-stationary series can
+  still say so. `ar_prior = "stationary"` truncates to `(-1, 1)`;
+  `ar_prior = "flat"` restores the old behaviour. A prior the caller supplies
+  for these classes is never overridden.
+
+  On a near-unit-root fixture (n = 23, true random-walk residual) this reduces
+  the ratio of raw to 1%-winsorized predictive variance from **1072x to 1.7x**
+  — i.e. the heavy tail that motivated the winsorization below was largely an
+  artefact of the unbounded prior, not a property of the data.
+
+* **`et_fit()` warns when more than 5% of an autocorrelation posterior sits at
+  `|value| >= 1`**, reporting the exact fraction and posterior mean. For AR(1)
+  this is precisely the posterior probability of a non-stationary process. The
+  message directs the user to read long-lead intervals, `temporal_var` and
+  `shelf_life()` as "no usable horizon" rather than as calibrated numbers.
+
+## Variance-estimator consistency
+
+* **`et_predict()` gains `var_trim` (default `0`), replacing the always-on,
+  undocumented 1% winsorization.** Two problems are fixed:
+  1. The winsorization was applied to the posterior-predictive variance *only*,
+     while `param_var` and the environmental pair stayed raw. `temporal_var`
+     was therefore a difference between two different estimators, biased low by
+     whatever the winsorization removed (~3.6% for a Gaussian at `trim = 0.01`)
+     — which blinded it to genuine autocorrelation shares below that threshold.
+     `var_trim` is now applied uniformly to **every** channel.
+  2. Reporting a winsorized variance next to a raw quantile credible interval
+     meant the budget and the interval described *different distributions*. With
+     the `var_trim = 0` default they describe the same one.
+
+  The tail diagnostic is still computed (against a fixed 1% reference,
+  regardless of `var_trim`, since it is a statement about the model rather than
+  the estimator) and now recommends `ar_prior = "stationary"` instead of
+  implying that a robust summary makes a diverging forecast trustworthy.
+
+  **This changes reported variance components** wherever the old winsorization
+  was biting — i.e. any near-unit-root autocorrelation fit.
+
 * Regression tests added in `tests/testthat/test-decompose-autocor.R`, covering
   `env_var` recovery under `ar()`, floor-rate, no decay with lead time, positive
   `temporal_var`, flat `param_var`, and an iid control. Reproduction scripts in

@@ -17,6 +17,7 @@ et_predict(
   n_env_draws = 1L,
   interval_type = c("predictive", "linpred"),
   include_env_in_ci = NULL,
+  var_trim = 0,
   ...
 )
 }
@@ -184,6 +185,24 @@ env-inclusive \code{total_var}.  The default \code{NULL} means
 \strong{auto}: env is folded in whenever the caller supplied non-zero
 \code{env_noise}, and omitted otherwise.  Pass \code{FALSE} to force a
 parameter + residual interval even when \code{env_noise} is given.}
+
+\item{var_trim}{Numeric in \eqn{[0, 0.5)}, default \code{0}.  Winsorization
+  applied when computing \emph{every} variance channel of the decomposition:
+  each column of draws is clipped to its
+  \eqn{[\code{var\_trim},\, 1 - \code{var\_trim}]} quantiles before
+  \code{var()}.  The default \code{0} is the plain sample variance, so the
+  reported budget describes exactly the distribution the quantile credible
+  interval is drawn from.  A non-zero value trades that coherence for
+  robustness against a heavy-tailed predictive distribution, and is applied
+  uniformly across \code{param_var}, \code{env_var}, the posterior-predictive
+  variance and hence \code{temporal_var} — never to one channel only, which
+  would bias their differences.
+
+  Winsorizing is \strong{not} the right remedy for a near-unit-root
+  autocorrelation posterior: it masks a diverging forecast variance rather
+  than fixing it, and leaves the budget describing a different distribution
+  from the interval.  Prefer a stationarity-respecting prior at fit time
+  (\code{\link{et_fit}(ar_prior = "stationary")}).}
 
 \item{...}{Passed to methods.}
 }

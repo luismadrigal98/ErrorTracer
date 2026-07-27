@@ -337,8 +337,10 @@ et_fit <- function(formula,
   if (stationary) {
     # Only claim a stationarity guarantee where one actually holds.
     p_order <- tryCatch({
-      ac <- brms::brmsterms(formula)$dpars$mu$ac
-      max(c(ac$p, ac$q), na.rm = TRUE)
+      ac  <- brms::brmsterms(formula)$dpars$mu$ac
+      ord <- suppressWarnings(as.numeric(c(ac$p, ac$q)))
+      ord <- ord[is.finite(ord)]
+      if (length(ord)) max(ord) else NA_real_
     }, error = function(e) NA_real_)
     if (is.finite(p_order) && p_order > 1) {
       .et_warn("ar_prior = 'stationary' bounds each autocorrelation ",

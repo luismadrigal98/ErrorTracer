@@ -140,12 +140,22 @@ test_that("temporal_var captures the autocor gap when has_autocor = TRUE", {
   expect_true(mean(d_ar$temporal_var) > mean(d_ar$residual_var))
 })
 
-test_that("autocorrelation temporal_var is robust to a single explosive draw", {
-  # Regression guard for the near-unit-root pathology: when an AR posterior has
-  # a tiny fraction of |phi| >= 1 draws, the far-lead forecast variance is
-  # heavy-tailed and a raw var() would be dominated by one explosive draw while
-  # the quantile interval is unaffected. The decomposition now uses a winsorized
-  # (tail-robust) predictive variance so it stays consistent with that interval.
+test_that("var_trim controls tail robustness of temporal_var, and is off by default", {
+  # Near-unit-root pathology: when an AR posterior has a tiny fraction of
+  # |phi| >= 1 draws, the far-lead forecast variance is heavy-tailed and a raw
+  # var() is dominated by one explosive draw while the quantile interval is not.
+  #
+  # Winsorization is now OPT-IN (var_trim, default 0), for two reasons:
+  #   1. Applying it to the posterior-predictive variance only, while param_var
+  #      and the env pair stayed raw, made temporal_var a difference between two
+  #      different estimators — biased low by whatever the winsorization removed.
+  #      var_trim is now applied uniformly to every channel.
+  #   2. Silently reporting a robust variance next to a raw quantile interval
+  #      means the budget and the interval describe different distributions. The
+  #      honest fix for a diverging AR is a stationarity-respecting prior at fit
+  #      time (et_fit(ar_prior = )), not a robust summary of the divergence.
+  # So the default must REPORT the tail, and var_trim must still be able to
+  # suppress it when the user explicitly asks.
   set.seed(202)
   n_obs <- 4L; n_draws <- 500L
   lp    <- matrix(rnorm(n_draws * n_obs, mean = 0.5, sd = 0.05), nrow = n_draws)
@@ -167,12 +177,46 @@ test_that("autocorrelation temporal_var is robust to a single explosive draw", {
     pp = pp_bad, mu_draws = lp, mu_perturbed = lp, mu_draws_sub = lp,
     family = gauss_family, disp_draws = disp_draws, has_autocor = TRUE))
 
-  # The one explosive draw must not blow up temporal_var: the robust estimate
-  # stays close to the clean one (a raw var() would be several times larger).
-  expect_lt(d_bad$temporal_var[n_obs], 2 * d_clean$temporal_var[n_obs])
-  # Budget still reconciles exactly.
-  recon <- d_bad$param_var + d_bad$env_var + d_bad$residual_var + d_bad$temporal_var
-  expect_equal(recon, d_bad$total_var, tolerance = 1e-10)
+  # DEFAULT (var_trim = 0): the explosive draw SHOWS UP. Hiding it would let a
+  # diverging forecast variance be reported as a calibrated number.
+  expect_gt(d_bad$temporal_var[n_obs], 2 * d_clean$temporal_var[n_obs])
+
+  # OPT-IN (var_trim = 0.01): the robust estimate stays close to the clean one.
+  d_bad_trim <- suppressWarnings(ErrorTracer:::.decompose_from_arrays(
+    pp = pp_bad, mu_draws = lp, mu_perturbed = lp, mu_draws_sub = lp,
+    family = gauss_family, disp_draws = disp_draws, has_autocor = TRUE,
+    var_trim = 0.01))
+  expect_lt(d_bad_trim$temporal_var[n_obs], 2 * d_clean$temporal_var[n_obs])
+
+  # Budget reconciles exactly under both settings.
+  for (d in list(d_bad, d_bad_trim)) {
+    recon <- d$param_var + d$env_var + d$residual_var + d$temporal_var
+    expect_equal(recon, d$total_var, tolerance = 1e-10)
+  }
+})
+
+test_that("var_trim is applied to every channel, not just the predictive variance", {
+  # The old code winsorized pp_var while param_var / the env pair stayed raw,
+  # so temporal_var = pp_var_winsorized - (param_var_raw + residual_var) was
+  # biased low. Guard: trimming must move param_var too.
+  set.seed(303)
+  n_obs <- 4L; n_draws <- 500L
+  lp <- matrix(rnorm(n_draws * n_obs), nrow = n_draws)
+  lp[1L, ] <- lp[1L, ] + 40          # one extreme draw in the linear predictor
+  pp <- lp + matrix(rnorm(n_draws * n_obs, sd = 0.4), nrow = n_draws)
+  gauss_family <- list(family = "gaussian", link = "identity",
+                       linkinv = identity)
+  disp_draws   <- list(sigma = rep(0.3, n_draws), phi = NULL,
+                       shape = NULL, nu = NULL)
+
+  d_raw <- ErrorTracer:::.decompose_from_arrays(
+    pp = pp, mu_draws = lp, mu_perturbed = lp, mu_draws_sub = lp,
+    family = gauss_family, disp_draws = disp_draws, var_trim = 0)
+  d_trim <- ErrorTracer:::.decompose_from_arrays(
+    pp = pp, mu_draws = lp, mu_perturbed = lp, mu_draws_sub = lp,
+    family = gauss_family, disp_draws = disp_draws, var_trim = 0.01)
+
+  expect_lt(mean(d_trim$param_var), mean(d_raw$param_var))
 })
 
 test_that("iid budget reconciles exactly: param + env + residual == total", {
