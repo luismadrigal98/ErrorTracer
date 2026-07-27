@@ -1,7 +1,10 @@
-# ErrorTracer (development version — unreleased)
+# ErrorTracer 1.3.0
 
-<!-- Version number to be assigned at release. Note that 1.2.1 is currently
-     under CRAN review and ships the autocorrelation defect fixed below. -->
+Corrects the variance decomposition for models carrying a residual
+autocorrelation term. **Any analysis using `ar()` / `ma()` / `arma()` /
+`cosy()` / `unstr()` / `sar()` / `car()` must be re-run**; iid models are
+unaffected (all three changes below are no-ops without an autocorrelation
+term). Note that 1.2.1, currently under CRAN review, ships the defect.
 
 
 ## Bug fixes — variance decomposition under autocorrelation
