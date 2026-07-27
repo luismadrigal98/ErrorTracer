@@ -310,18 +310,36 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   }
 
   # --- 2. Linear predictor draws (link scale, parameter uncertainty only) ---
-  # The mean structure carries no autocorrelation (ar()/ma() act on the
-  # residual), so the linear predictor is computed directly on newdata.
-  lp <- brms::posterior_linpred(fit, newdata = newdata, draw_ids = draw_ids)
+  # IMPORTANT: under brms's default ar(cov = FALSE) parameterisation the
+  # autocorrelation term enters the *mean* (mu[n] += ar * err[n-1]), not only
+  # the covariance. A plain posterior_linpred() therefore returns
+  # regression-LP + AR-error, which breaks the decomposition two ways:
+  #   (a) param_var stops being parameter uncertainty and absorbs the AR error
+  #       (observed: LP variance growing 0.11 -> 0.93 over a 15-step horizon on
+  #       *non-trending* newdata — an 8.9x overstatement at the far lead);
+  #   (b) env_var = Var(mu_perturbed) - Var(mu_draws_sub) becomes a difference
+  #       between a hand-rolled LP (no AR term, from .compute_lp_perturbed) and
+  #       an AR-carrying LP, i.e. V_env - V_AR. That goes negative and is then
+  #       clamped by pmax(., 0), silently destroying the environmental channel.
+  # incl_autocor = FALSE returns the pure regression linear predictor — exactly
+  # what the param/env channels are defined to mean — and is bit-identical to
+  # the predictor .compute_lp_perturbed() builds (verified: max |diff| = 0), so
+  # the AR term cancels cleanly in the env subtraction. The AR accumulation is
+  # not lost: it is recovered as temporal_var from the history-conditioned
+  # posterior predictive (pp) below.
+  # Regression tests: tests/testthat/test-decompose-autocor.R
+  lp <- brms::posterior_linpred(fit, newdata = newdata, draw_ids = draw_ids,
+                                incl_autocor = FALSE)
 
   # --- 3. Response-scale parameter draws ---
   # For Gaussian identity g^{-1}(eta) = eta, so mu_draws == lp — reuse it.
   # For all other families, apply the inverse link to get the response scale.
+  # incl_autocor = FALSE for the same reason as above.
   mu_draws <- if (is_gauss_id) {
     lp
   } else {
     brms::posterior_linpred(fit, newdata = newdata, draw_ids = draw_ids,
-                            transform = TRUE)
+                            transform = TRUE, incl_autocor = FALSE)
   }
 
   # --- 4. Draws matrix and dispersion parameters ---
@@ -920,6 +938,31 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     0,
     sqrt((v_perturbed * f_se)^2 + (v_param_sub * f_se)^2)
   )
+
+  # Instrument the floor. pmax(., 0) exists to absorb Monte Carlo jitter around
+  # a TRUE zero (e.g. a binary predictor, where env is structurally zero). But a
+  # floor that fires *systematically* means the subtraction estimator is
+  # mis-specified, not merely noisy — that is exactly how the ar() contamination
+  # of mu_draws went unnoticed (env_var floored on 13 of 15 lead times while the
+  # analytic value was ~0.15). A silent floor is a silent failure, so surface it.
+  # A floored row is only diagnostic when its negative excursion exceeds the
+  # estimator's OWN Monte Carlo error; otherwise it is the jitter the floor is
+  # there to absorb (routine at small n_obs / n_perturb). Hence the 2 * MCSE
+  # test rather than a raw count, plus a minimum row count so tiny prediction
+  # sets cannot trip it.
+  sig_negative <- !is_zero & !is.na(v_env_raw) &
+                  (v_env_raw < -2 * v_env_mcse)
+  n_sig        <- sum(sig_negative)
+  if (n_sig >= 3L && n_sig > 0.3 * n_obs) {
+    .et_warn("env_var was floored at zero on ", n_sig, " of ", n_obs,
+             " observation(s) where the shortfall exceeded twice its Monte ",
+             "Carlo SE -- too systematic to be jitter. The subtraction ",
+             "estimator Var(perturbed) - Var(unperturbed) is likely comparing ",
+             "two differently-constructed linear predictors. Check that both ",
+             "are built the same way (see incl_autocor in et_predict), raise ",
+             "n_perturb, or verify env_noise is non-zero for predictors ",
+             "actually in the model.")
+  }
 
   # Residual variance: family-specific expected within-draw variance.
   # For models with an autocor term this is the *innovation* variance

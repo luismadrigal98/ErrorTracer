@@ -71,6 +71,26 @@
 #'   informed priors are \emph{dropped} because they target \code{class = "b"}
 #'   terms and \code{me()} terms live under \code{class = "bsp"}; brms
 #'   defaults are used instead (and a warning is logged).
+#' @param ar_prior Character. Prior on autocorrelation parameters
+#'   (\code{class = "ar"} / \code{"ma"}) when the formula carries an
+#'   \code{ar()} / \code{ma()} / \code{arma()} term. \code{brms}'s own default
+#'   is \emph{flat and unbounded}, which on a short series lets the posterior
+#'   straddle the unit root; the k-step forecast variance
+#'   \eqn{\sigma^2 (1 - \phi^{2k}) / (1 - \phi^2)} then diverges, and
+#'   \code{temporal_var} and \code{\link{shelf_life}} become uninterpretable.
+#'   Options:
+#'   \describe{
+#'     \item{\code{"weakly_informative"}}{(default) \code{normal(0, 0.5)} — about
+#'       95\% of the prior mass lies inside \eqn{(-1, 1)}, but the parameter is
+#'       not hard-bounded, so a genuinely non-stationary series can still say so.}
+#'     \item{\code{"stationary"}}{The same prior truncated to \eqn{(-1, 1)}. For
+#'       AR(1) this is exactly the stationarity region; for higher orders it is
+#'       necessary but not sufficient, and a warning says so.}
+#'     \item{\code{"flat"}}{\code{brms}'s unbounded default.}
+#'   }
+#'   A prior the caller supplies for these classes is never overridden.
+#'   Regardless of the setting, \code{et_fit()} warns after fitting when more
+#'   than 5\% of the posterior sits at \eqn{|\phi| \ge 1}.
 #' @param silent Integer passed to \code{brms::brm()} (default 2, no Stan
 #'   output).
 #' @param ... Additional arguments passed to \code{brms::brm()}.
@@ -99,8 +119,11 @@ et_fit <- function(formula,
                    max_treedepth = 12L,
                    grouping = NULL,
                    eiv = NULL,
+                   ar_prior = c("weakly_informative", "stationary", "flat"),
                    silent = 2L,
                    ...) {
+
+  ar_prior <- match.arg(ar_prior)
 
   # Rewrite formula + augment data for measurement-error predictors if eiv
   # was supplied. Strips any et_prior_spec priors because their (class="b",
@@ -129,7 +152,7 @@ et_fit <- function(formula,
       formula = formula, data = data, priors = priors,
       chains = chains, iter = iter, warmup = warmup, cores = cores,
       seed = seed, adapt_delta = adapt_delta, max_treedepth = max_treedepth,
-      grouping = grouping, silent = silent, ...
+      grouping = grouping, ar_prior = ar_prior, silent = silent, ...
     )
     if (!is.null(eiv_spec)) result$eiv_spec <- eiv_spec
     return(result)
@@ -139,7 +162,7 @@ et_fit <- function(formula,
     formula = formula, data = data, priors = priors,
     chains = chains, iter = iter, warmup = warmup, cores = cores,
     seed = seed, adapt_delta = adapt_delta, max_treedepth = max_treedepth,
-    silent = silent, ...
+    ar_prior = ar_prior, silent = silent, ...
   )
   if (!is.null(eiv_spec)) result$eiv_spec <- eiv_spec
   result
@@ -212,10 +235,20 @@ et_fit <- function(formula,
 
 .et_fit_single <- function(formula, data, priors, chains, iter, warmup,
                             cores, seed, adapt_delta, max_treedepth,
-                            silent, ...) {
+                            silent, ar_prior = "weakly_informative", ...) {
 
   brms_prior <- if (inherits(priors, "et_prior_spec")) priors$prior
                 else priors  # brmsprior or NULL
+
+  # Autocorrelation parameters: brms's default prior on class "ar" / "ma" is
+  # FLAT AND UNBOUNDED, so nothing keeps the process inside the stationary
+  # region. On a short series that routinely yields posteriors straddling the
+  # unit root, whose k-step forecast variance then explodes. Attach a
+  # weakly-informative default instead (see .ar_prior_spec).
+  ac_prior <- .ar_prior_spec(formula, data, ar_prior, existing = brms_prior)
+  if (!is.null(ac_prior)) {
+    brms_prior <- if (is.null(brms_prior)) ac_prior else c(brms_prior, ac_prior)
+  }
 
   n_pred <- length(attr(stats::terms(formula, data = data), "term.labels"))
   .et_info("Fitting Bayesian model: ", deparse(formula),
@@ -239,6 +272,11 @@ et_fit <- function(formula,
   # Convergence nudge: a quick Rhat / divergence check so the user is warned
   # BEFORE predicting (Stage 3). Full diagnostics live in et_diagnose().
   .et_check_convergence(fit)
+  # Stationarity nudge: a near-unit-root autocorrelation posterior makes the
+  # far-lead predictive variance heavy-tailed, which downstream shows up as a
+  # dominant temporal_var and an exploding shelf-life ratio. Surface it here,
+  # where the user can still act on it, rather than at decomposition time.
+  .et_check_stationarity(fit)
 
   structure(
     list(
@@ -254,6 +292,98 @@ et_fit <- function(formula,
     ),
     class = "et_model"
   )
+}
+
+# ******************************************************************************
+# Internal: autocorrelation-parameter priors and stationarity diagnostic
+# ______________________________________________________________________________
+
+# brms puts a FLAT, UNBOUNDED prior on class "ar" / "ma"
+# (get_prior() reports "(flat)" with no lb/ub). For a long, well-identified
+# series that is harmless; on the short series typical of ecological panels it
+# lets the posterior straddle |phi| >= 1, and the k-step-ahead forecast variance
+# sigma^2 (1 - phi^(2k)) / (1 - phi^2) then diverges. The downstream symptoms are
+# a heavy-tailed predictive distribution, a temporal_var that swamps every other
+# channel, and a shelf-life ratio that explodes.
+#
+# Defaults:
+#   "weakly_informative" (default) -- normal(0, 0.5), which places ~95% of the
+#       prior mass inside (-1, 1) but does NOT hard-bound the parameter, so a
+#       genuinely non-stationary series can still say so.
+#   "stationary" -- the same prior truncated to (-1, 1). For AR(1) this IS the
+#       stationarity region. For p > 1 it is necessary but NOT sufficient, so we
+#       say so rather than implying a guarantee.
+#   "flat" -- brms's default; preserves the pre-existing behaviour.
+#
+# Never overrides a class the caller already specified.
+.ar_prior_spec <- function(formula, data, ar_prior = "weakly_informative",
+                           existing = NULL) {
+  if (identical(ar_prior, "flat")) return(NULL)
+  if (!.formula_has_autocor(formula)) return(NULL)
+
+  classes <- tryCatch({
+    gp <- brms::get_prior(brms::bf(formula), data = data)
+    intersect(unique(as.character(gp$class)), c("ar", "ma"))
+  }, error = function(e) character(0))
+  if (!length(classes)) return(NULL)
+
+  if (!is.null(existing) && !is.null(existing$class)) {
+    classes <- setdiff(classes, as.character(existing$class))
+  }
+  if (!length(classes)) return(NULL)
+
+  stationary <- identical(ar_prior, "stationary")
+
+  if (stationary) {
+    # Only claim a stationarity guarantee where one actually holds.
+    p_order <- tryCatch({
+      ac <- brms::brmsterms(formula)$dpars$mu$ac
+      max(c(ac$p, ac$q), na.rm = TRUE)
+    }, error = function(e) NA_real_)
+    if (is.finite(p_order) && p_order > 1) {
+      .et_warn("ar_prior = 'stationary' bounds each autocorrelation ",
+               "coefficient to (-1, 1). For order ", p_order,
+               " that is necessary but NOT sufficient for stationarity; the ",
+               "stationary region is not the hypercube. Check the fitted ",
+               "coefficients before trusting long-lead forecasts.")
+    }
+  }
+
+  parts <- lapply(classes, function(cl) {
+    if (stationary) {
+      brms::set_prior("normal(0, 0.5)", class = cl, lb = -1, ub = 1)
+    } else {
+      brms::set_prior("normal(0, 0.5)", class = cl)
+    }
+  })
+  do.call(c, parts)
+}
+
+# Post-fit stationarity nudge. For AR(1), P(|phi| >= 1) is exactly the posterior
+# probability of a non-stationary process; for higher orders it is a coarse
+# proxy, which the message reflects. Warns, never stops -- a random-walk residual
+# can be the correct answer, but the user must know it is what they have.
+.et_check_stationarity <- function(fit) {
+  dm <- tryCatch(as.matrix(fit), error = function(e) NULL)
+  if (is.null(dm)) return(invisible(NULL))
+  ac_cols <- grep("^(ar|ma)\\[", colnames(dm), value = TRUE)
+  if (!length(ac_cols)) return(invisible(NULL))
+
+  for (cl in ac_cols) {
+    p_ge1 <- mean(abs(dm[, cl]) >= 1, na.rm = TRUE)
+    if (is.finite(p_ge1) && p_ge1 > 0.05) {
+      .et_warn("Autocorrelation parameter ", cl, " has ",
+               round(100 * p_ge1), "% of its posterior at |value| >= 1 ",
+               "(posterior mean ", round(mean(dm[, cl], na.rm = TRUE), 3),
+               "). The residual process is at or beyond the unit root, so the ",
+               "k-step forecast variance grows without bound and long-lead ",
+               "intervals, temporal_var and shelf_life() should be read as ",
+               "'no usable horizon' rather than as calibrated numbers. ",
+               "Consider ar_prior = 'stationary', a longer training series, ",
+               "or differencing the response.")
+    }
+  }
+  invisible(NULL)
 }
 
 # Lightweight post-fit convergence nudge. Warns (never stops) on high Rhat or
@@ -289,7 +419,8 @@ et_fit <- function(formula,
 
 .et_fit_grouped <- function(formula, data, priors, chains, iter, warmup,
                              cores, seed, adapt_delta, max_treedepth,
-                             grouping, silent, ...) {
+                             grouping, silent,
+                             ar_prior = "weakly_informative", ...) {
 
   if (!grouping %in% colnames(data)) {
     stop("grouping column '", grouping, "' not found in data.")
@@ -316,7 +447,7 @@ et_fit <- function(formula,
         formula = formula, data = sub_data, priors = group_prior,
         chains = chains, iter = iter, warmup = warmup, cores = cores,
         seed = seed, adapt_delta = adapt_delta, max_treedepth = max_treedepth,
-        silent = silent, ...
+        ar_prior = ar_prior, silent = silent, ...
       ),
       error = function(e) {
         .et_error("Failed to fit model for group ", gname, ": ", e$message)

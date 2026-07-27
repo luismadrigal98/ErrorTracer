@@ -1,3 +1,56 @@
+# ErrorTracer (development version — unreleased)
+
+<!-- Version number to be assigned at release. Note that 1.2.1 is currently
+     under CRAN review and ships the autocorrelation defect fixed below. -->
+
+
+## Bug fixes — variance decomposition under autocorrelation
+
+* **`env_var` was silently destroyed for any model with an `ar()` / `ma()` /
+  `arma()` term.** Under brms's default `ar(cov = FALSE)` parameterisation the
+  autocorrelation term enters the **mean** (`mu[n] += ar * err[n-1]`), not only
+  the covariance. `decompose_uncertainty()` computed
+  `env_var = Var(mu_perturbed) - Var(mu_draws)` where `mu_perturbed` came from an
+  internal hand-rolled linear predictor (no AR term) while `mu_draws` came from
+  `posterior_linpred()` (AR term included). The difference was therefore
+  `V_env - V_AR`, which turns negative as the AR error grows and was then clamped
+  to zero by `pmax(., 0)`.
+
+  In a controlled test (AR(1), phi = 0.9, analytic `V_env = beta^2 * delta^2 =
+  0.152`) the reported `env_var` averaged **0.012 and was floored to exactly zero
+  at 13 of 15 lead times**; the iid control recovered 0.173 correctly. Both
+  `posterior_linpred()` calls now pass `incl_autocor = FALSE`, which returns the
+  pure regression linear predictor — verified bit-identical to the internal
+  predictor, so the AR term cancels exactly in the subtraction. `env_var` now
+  averages 0.145 with no floored rows.
+
+* **`param_var` no longer absorbs the autocorrelation error, and `temporal_var`
+  no longer collapses to zero.** The same contamination meant `param_var` grew
+  with lead time even on non-trending new data (0.154 -> 0.976 over 15 steps, an
+  8.9x overstatement of parameter uncertainty at the far lead), which in turn
+  made `temporal_var = pmax(0, pp_var - (param_var + residual_var))` evaluate to
+  **zero at every lead for a series with phi = 0.82**. After the fix `param_var`
+  is flat (0.154 -> 0.147) and `temporal_var` grows monotonically 0 -> 0.637,
+  correctly reporting zero at lead 1 where a single innovation adds nothing
+  beyond `residual_var`.
+
+  **This changes reported numbers for every autocorrelation model.** Analyses
+  using `ar()`/`ma()`/`arma()`/`cosy()`/`unstr()`/`sar()`/`car()` must be re-run.
+
+* **The `env_var` zero-floor is now instrumented.** `decompose_uncertainty()`
+  warns when the floor fires on rows whose shortfall exceeds twice its own Monte
+  Carlo SE — too systematic to be jitter. The silent floor is what hid the bug
+  above through two review rounds. The test is statistical rather than a raw
+  count, so small prediction sets (where a floored row genuinely is jitter) do
+  not trip it.
+
+* Regression tests added in `tests/testthat/test-decompose-autocor.R`, covering
+  `env_var` recovery under `ar()`, floor-rate, no decay with lead time, positive
+  `temporal_var`, flat `param_var`, and an iid control. Reproduction scripts in
+  `tests/manual/`. The previous suite missed all of this because its mock builds
+  `mu_perturbed` as `lp + noise`, i.e. it assumed the two arrays were already on
+  the same footing.
+
 # ErrorTracer 1.2.1
 
 * **Fix: platform-dependent `v_env_mcse` on aarch64 (macOS arm64).** This is
