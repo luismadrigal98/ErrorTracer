@@ -1,66 +1,79 @@
-This is a resubmission of an archived package (1.2.1). ErrorTracer was
-archived on 2026-06-08 because a test failure on macOS arm64 was not
-corrected. This version fixes that failure. No reverse dependencies were
-detected on CRAN.
+## Summary
 
-## The archival issue, and how it is fixed
+This is a bug-fix and feature release (1.3.0) following 1.2.1.
 
-**Cause.** In the uncertainty decomposition, the "no environmental noise"
-case was detected by testing a computed variance difference for exact
-equality with zero (`v_perturbed - v_param_sub == 0`), and the two column
-variances were computed with different `stats::var()` `na.rm` settings.
-Those settings select different C code paths in `cov.c`
-("na.or.complete" vs "everything"), which round identically on x86_64 but
-not on aarch64. A last-bit difference therefore flipped the reported Monte
-Carlo standard error of `env_var` from 0 to 0.20, failing
-`test-v-env-stability.R:53` on the two `r-*-macos-arm64` flavours.
+It corrects a substantive statistical error in the package's core
+functionality: the variance decomposition returned incorrect components for
+any model carrying a residual autocorrelation term. Users of `ar()` / `ma()` /
+`arma()` / `cosy()` / `unstr()` / `sar()` / `car()` models should re-run their
+analyses. Models without an autocorrelation term are unaffected — all three
+changes below are provably no-ops in that case.
 
-**Fix.** Both variances are now computed the same way, and the zero test
-uses a relative tolerance (`sqrt(.Machine$double.eps)`, the `all.equal()`
-convention) rather than exact floating-point equality, so the result no
-longer depends on bit-level floating-point reproducibility across
-platforms. Two regression tests were added, one of which reproduces the
-aarch64 behaviour on any platform by introducing a ULP-scale difference
-between the two inputs.
+## The bug, and how it was found
 
-The third ERROR on the archived check page
-(r-devel-linux-x86_64-debian-gcc) was `Package required but not
-available: 'brms'`, i.e. a missing dependency in that check environment
-rather than a defect in this package. `brms` is declared in Imports and
-the package checks cleanly where it is installed.
+`decompose_uncertainty()` computed the environmental variance component as
+`Var(perturbed linear predictor) - Var(unperturbed linear predictor)`. The
+first array was built internally from the posterior draws matrix and carried
+no autocorrelation term; the second came from `brms::posterior_linpred()`,
+which under brms's default `ar(cov = FALSE)` parameterisation *does* include
+the autocorrelation contribution to the mean. The subtraction therefore
+evaluated `V_env - V_AR`, which turns negative as the AR error grows and was
+then clamped to zero by a `pmax(., 0)` guard intended only to absorb Monte
+Carlo jitter.
 
-## Other changes since the last CRAN release (1.1.0)
+The defect was invisible on inspection — the source comment asserted that
+"the mean structure carries no autocorrelation" — and was found by testing the
+package against a closed-form target instead. In a controlled AR(1) fit
+(phi = 0.9) whose analytic environmental variance is
+`beta^2 * delta^2 = 0.152`, the reported `env_var` averaged **0.012 and was
+floored to exactly zero at 13 of 15 lead times**; the corresponding iid
+control recovered 0.173 correctly. The same contamination inflated
+`param_var` by a factor of 8.9 at the far lead and drove `temporal_var` to
+**zero at every lead time** for a series with strong, unambiguous residual
+autocorrelation.
 
-See NEWS.md for the full 1.2.0 entry. In summary: the variance budget is
-now internally consistent (`total_var` is defined as the sum of its
-components, so shares sum to 100%), covariate error can be propagated
-pathwise via a driver ensemble, the autocorrelation/temporal variance
-component was corrected and made tail-robust, and `shelf_life()` gained a
-null-model skill gate.
+## Fixes
+
+* Both `posterior_linpred()` calls now pass `incl_autocor = FALSE`, returning
+  the pure regression linear predictor. This is verified bit-identical to the
+  internally-constructed predictor, so the autocorrelation term cancels
+  exactly in the subtraction. `env_var` now recovers 0.145 against the 0.152
+  target with no floored rows; `param_var` is flat in lead time as it should
+  be; `temporal_var` grows monotonically and is correctly zero at lead 1.
+
+* `var_trim` (new argument to `et_predict()`, default `0`) applies a single
+  variance estimator to every channel. Previously the posterior-predictive
+  variance was winsorized while the parameter and environmental terms were
+  not, so `temporal_var` was a difference between two different estimators,
+  biased low by roughly the amount the winsorization removed.
+
+* `ar_prior` (new argument to `et_fit()`, default `"weakly_informative"`)
+  replaces brms's flat, unbounded prior on autocorrelation coefficients with
+  `normal(0, 0.5)`, and `et_fit()` now warns when more than 5% of the
+  posterior lies at `|phi| >= 1`. On a short series the unbounded default
+  routinely yields posteriors straddling the unit root, where the k-step
+  forecast variance diverges. `ar_prior = "stationary"` truncates to
+  `(-1, 1)`; `ar_prior = "flat"` restores the previous behaviour.
+
+* `env_var`'s zero-floor is now instrumented: `decompose_uncertainty()` warns
+  when the floor fires on rows whose shortfall exceeds twice its own Monte
+  Carlo standard error, i.e. more systematically than jitter explains. The
+  silent floor is what concealed the bug above.
+
+New regression tests in `tests/testthat/test-decompose-autocor.R` fail on the
+old behaviour and pass on the new. `tests/manual/` holds the two standalone
+reproduction scripts. See NEWS.md for the full entry.
 
 ## Test environments
 
-* local Linux install (Ubuntu), R 4.5.3
+* local Linux install (Ubuntu), R 4.6.1
 * win-builder (devel and release)
-
-The archival failure was specific to aarch64, which I cannot test
-directly. It was addressed by making the affected code path independent
-of bit-exact floating-point equality, and by a regression test that
-reproduces the divergence on x86_64.
 
 ## R CMD check results
 
-0 errors | 0 warnings | 1 note
+`R CMD check --as-cran --run-donttest` on the built tarball.
 
-The note is the expected resubmission note:
-
-```
-New submission
-Package was archived on CRAN
-```
-
-`R CMD check --as-cran --run-donttest` executes all \donttest{}
-examples successfully.
+0 errors | 0 warnings | 0 notes
 
 ## Reverse dependencies
 
