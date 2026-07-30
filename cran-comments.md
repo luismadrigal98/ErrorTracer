@@ -71,9 +71,34 @@ reproduction scripts. See NEWS.md for the full entry.
 
 ## R CMD check results
 
-`R CMD check --as-cran --run-donttest` on the built tarball.
+`R CMD check --as-cran --run-donttest` on the built tarball:
 
-0 errors | 0 warnings | 0 notes
+0 errors | 0 warnings | 1 note
+
+The note is the expected one for a Stan-backed package:
+
+```
+* checking examples ... NOTE
+Examples with CPU (user + system) or elapsed time > 5s
+                        user system elapsed
+decompose_uncertainty 55.095  2.676  58.800
+et_calibrate          51.304  2.301  53.721
+shelf_life            51.136  2.310  53.537
+et_fit                49.957  2.267  52.356
+```
+
+These four examples each fit one Bayesian model, so almost all of that time is
+Stan model **compilation** rather than computation. The examples are already
+minimal — 20 observations, one predictor, a single chain of 500 iterations, of
+which sampling accounts for under a second — so the cost is not reducible by
+shrinking them further. They are wrapped in `\donttest{}`. This note was
+present in the previously accepted 1.2.x releases and no example has been
+added or enlarged since.
+
+For context on total check time: the `testthat` suite is gated with
+`skip_on_cran()`, so it runs in about 4 seconds under CRAN's settings (341
+seconds locally with `NOT_CRAN=true`, as reported above). Vignettes do not fit
+models at build time.
 
 ## Reverse dependencies
 
