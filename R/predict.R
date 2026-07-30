@@ -320,6 +320,35 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   n_perturb <- min(n_perturb, n_draws)
   draw_ids  <- seq_len(n_draws)
 
+  # Hierarchical structure: does newdata ask about groups the fit never saw?
+  #
+  # This is the in-sample / out-of-sample distinction. For a KNOWN group the
+  # group effect is an estimated parameter whose posterior uncertainty already
+  # sits inside the linear predictor, and conditioning on it *reduces*
+  # predictive variance relative to the population level -- so there is no extra
+  # channel, and Var(full) - Var(population) is NEGATIVE (measured on a 6-group
+  # fixture: 0.022 vs 0.244). Reporting that difference as a "group variance"
+  # would repeat the ar() error: subtracting two quantities that are not
+  # conditioned alike.
+  #
+  # For a NEW group the budget must integrate over the group-level distribution,
+  # and the extra variance is the between-group variance tau^2. brms supplies
+  # that via sample_new_levels = "gaussian", making the subtraction like-for-like
+  # (both population-level, one with a group effect drawn from the fitted
+  # hyperprior). Verified: difference 1.88 against tau_hat^2 = 1.52.
+  has_ranef  <- .fit_has_ranef(fit)
+  new_levels <- has_ranef && .newdata_has_new_levels(fit, newdata)
+  nl_args    <- if (new_levels) {
+    list(allow_new_levels = TRUE, sample_new_levels = "gaussian")
+  } else {
+    list()
+  }
+  if (new_levels) {
+    .et_info("newdata contains group level(s) not present in the training data; ",
+             "predicting out-of-sample by integrating over the group-level ",
+             "distribution, and reporting a separate group_var channel.")
+  }
+
   # --- 1. Posterior predictive (full uncertainty, response scale) ---
   # For autocorrelation models, iterate the process across the horizon by
   # predicting on the training series continued with the forecast rows
@@ -328,7 +357,8 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   pp <- if (has_autocor) {
     .posterior_predict_forecast(fit, model$data, newdata, draw_ids)
   } else {
-    brms::posterior_predict(fit, newdata = newdata, draw_ids = draw_ids)
+    do.call(brms::posterior_predict,
+            c(list(fit, newdata = newdata, draw_ids = draw_ids), nl_args))
   }
 
   # --- 2. Linear predictor draws (link scale, parameter uncertainty only) ---
@@ -350,8 +380,9 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # not lost: it is recovered as temporal_var from the history-conditioned
   # posterior predictive (pp) below.
   # Regression tests: tests/testthat/test-decompose-autocor.R
-  lp <- brms::posterior_linpred(fit, newdata = newdata, draw_ids = draw_ids,
-                                incl_autocor = FALSE)
+  lp <- do.call(brms::posterior_linpred,
+                c(list(fit, newdata = newdata, draw_ids = draw_ids,
+                       incl_autocor = FALSE), nl_args))
 
   # --- 3. Response-scale parameter draws ---
   # For Gaussian identity g^{-1}(eta) = eta, so mu_draws == lp — reuse it.
@@ -360,8 +391,21 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   mu_draws <- if (is_gauss_id) {
     lp
   } else {
-    brms::posterior_linpred(fit, newdata = newdata, draw_ids = draw_ids,
-                            transform = TRUE, incl_autocor = FALSE)
+    do.call(brms::posterior_linpred,
+            c(list(fit, newdata = newdata, draw_ids = draw_ids,
+                   transform = TRUE, incl_autocor = FALSE), nl_args))
+  }
+
+  # --- 3b. Group-level (hierarchical) channel ---
+  # See the block above .et_new_level_args() for why this is only computed for
+  # groups the fit has not seen.
+  mu_pop_draws <- if (new_levels) {
+    do.call(brms::posterior_linpred, c(
+      list(fit, newdata = newdata, draw_ids = draw_ids,
+           transform = !is_gauss_id, incl_autocor = FALSE, re_formula = NA)
+    ))
+  } else {
+    NULL
   }
 
   # --- 4. Draws matrix and dispersion parameters ---
@@ -458,7 +502,8 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
     family       = fit$family,
     disp_draws   = disp_draws,
     has_autocor  = has_autocor,
-    var_trim     = var_trim
+    var_trim     = var_trim,
+    mu_pop_draws = mu_pop_draws
   )
 
   structure(
@@ -928,7 +973,8 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 #                AR/MA/ARMA-induced predictive variance beyond the iid sum.
 .decompose_from_arrays <- function(pp, mu_draws, mu_perturbed, mu_draws_sub,
                                     family, disp_draws,
-                                    has_autocor = FALSE, var_trim = 0) {
+                                    has_autocor = FALSE, var_trim = 0,
+                                    mu_pop_draws = NULL) {
   n_obs <- ncol(pp)
   n_p   <- nrow(mu_perturbed)
 
@@ -942,7 +988,21 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   col_var <- function(m) .robust_col_var(m, trim = var_trim)
 
   # Parameter uncertainty: variance of the response-scale posterior mean.
-  param_var <- col_var(mu_draws)
+  #
+  # When predicting for a NEW group level, mu_draws carries a group effect drawn
+  # from the fitted hyperprior, so its variance is parameter uncertainty PLUS
+  # between-group variance. Attribute those separately: param_var is then the
+  # population-level variance, and group_var is the increment. Because group_var
+  # is defined as the difference, param_var + group_var == Var(mu_draws) exactly,
+  # so the budget still reconciles by construction (the same device that makes
+  # env_var a genuine sub-share rather than an add-on).
+  has_group <- !is.null(mu_pop_draws)
+  param_var <- if (has_group) col_var(mu_pop_draws) else col_var(mu_draws)
+  group_var <- if (has_group) {
+    pmax(col_var(mu_draws) - col_var(mu_pop_draws), 0)
+  } else {
+    NULL
+  }
 
   # Environmental variance: subtraction estimator on the response scale.
   # Both column variances must be computed the SAME way: stats::var() dispatches
@@ -1032,12 +1092,14 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     # Clamped at 0 to absorb small Monte Carlo noise. env is excluded from
     # this gap because pp uses unperturbed predictors (so env is not in pp_var
     # and must not be double-subtracted); it re-enters total_var below.
-    temporal_var <- pmax(0, pp_var - (param_var + residual_var))
+    temporal_var <- pmax(0, pp_var -
+                            (param_var + .zero_if_null(group_var) + residual_var))
     # Total variance now CONTAINS every component. env enters through the
     # perturbed predictors, temporal through the AR accumulation. Defining
     # total as the component sum makes the budget reconcile EXACTLY (law of
     # total variance), so the reported percentage shares sum to 100%.
-    total_var <- param_var + env_var + residual_var + temporal_var
+    total_var <- param_var + .zero_if_null(group_var) + env_var +
+                 residual_var + temporal_var
     # Tail diagnostic. Computed against a fixed 1% winsorized reference
     # REGARDLESS of var_trim, because it is a statement about the model (is the
     # AR posterior near the unit root?), not about the estimator in use. The
@@ -1062,8 +1124,8 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     temporal_var <- NULL
     # iid: total variance is the exact law-of-total-variance sum. Using the
     # analytic sum (rather than the noisier sampled pp variance) guarantees
-    # param + env + residual == total exactly.
-    total_var <- param_var + env_var + residual_var
+    # param + group + env + residual == total exactly.
+    total_var <- param_var + .zero_if_null(group_var) + env_var + residual_var
   }
 
   out <- data.frame(
@@ -1075,6 +1137,13 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     residual_var = residual_var,
     stringsAsFactors = FALSE
   )
+  # Column order mirrors the budget: parameter, group, environmental, residual,
+  # temporal. group_var is present only for out-of-sample (new-level) prediction.
+  if (!is.null(group_var)) {
+    out <- cbind(out[, c("obs_id", "total_var", "param_var")],
+                 group_var = group_var,
+                 out[, c("env_var", "v_env_mcse", "residual_var")])
+  }
   if (!is.null(temporal_var)) out$temporal_var <- temporal_var
 
   out

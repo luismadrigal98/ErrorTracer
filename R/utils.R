@@ -379,3 +379,60 @@ et_theme <- function(base_size = 12) {
   txt <- paste(deparse(formula), collapse = " ")
   grepl("\\b(ar|ma|arma|cosy|unstr|sar|car)\\s*\\(", txt)
 }
+
+# Treat an absent variance channel as a scalar zero so it can be summed into the
+# budget without branching at every call site.
+.zero_if_null <- function(x) if (is.null(x)) 0 else x
+
+# ******************************************************************************
+# Internal: group-level (random-effects) structure
+# ______________________________________________________________________________
+# TRUE when the fit carries at least one group-level term, e.g. (1 | g).
+# brms stores these in fit$ranef (a data.frame, one row per term); fall back to
+# ranef() and then to a regex on the formula.
+.fit_has_ranef <- function(fit) {
+  if (is.null(fit)) return(FALSE)
+  if (inherits(fit, "et_model")) fit <- fit$fit
+  if (!inherits(fit, "brmsfit")) return(FALSE)
+
+  ok <- tryCatch(is.data.frame(fit$ranef) && nrow(fit$ranef) > 0L,
+                 error = function(e) NA)
+  if (isTRUE(ok) || isFALSE(ok)) return(ok)
+
+  ok <- tryCatch(length(brms::ranef(fit)) > 0L, error = function(e) NA)
+  if (isTRUE(ok) || isFALSE(ok)) return(ok)
+
+  grepl("\\|", paste(deparse(stats::formula(fit)), collapse = " "))
+}
+
+# Grouping factors named in the fit's group-level terms, e.g. "g" for (1 | g).
+.ranef_groups <- function(fit) {
+  if (inherits(fit, "et_model")) fit <- fit$fit
+  out <- tryCatch(unique(as.character(fit$ranef$group)),
+                  error = function(e) character(0))
+  out[!is.na(out) & nzchar(out)]
+}
+
+# Does newdata introduce levels the fit has never seen?
+#
+# This is the in-sample / out-of-sample distinction that matters for the
+# variance budget. Predicting for a KNOWN group uses that group's estimated
+# effect, which *reduces* predictive uncertainty relative to the population
+# level (verified: Var 0.022 vs 0.244 on a 6-group fixture). Predicting for a
+# NEW group must instead integrate over the group-level distribution, which
+# ADDS the between-group variance tau^2. They are different budgets and must
+# not be reported as the same quantity.
+.newdata_has_new_levels <- function(fit, newdata) {
+  if (inherits(fit, "et_model")) fit <- fit$fit
+  grps <- .ranef_groups(fit)
+  if (!length(grps)) return(FALSE)
+  train <- tryCatch(fit$data, error = function(e) NULL)
+  if (is.null(train)) return(FALSE)
+  for (g in grps) {
+    if (!g %in% colnames(newdata) || !g %in% colnames(train)) next
+    if (any(!as.character(newdata[[g]]) %in% as.character(train[[g]]))) {
+      return(TRUE)
+    }
+  }
+  FALSE
+}
