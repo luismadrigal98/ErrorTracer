@@ -1,68 +1,80 @@
 ## Summary
 
-This is a bug-fix and feature release (1.3.0) following 1.2.1.
+This is a bug-fix release (1.3.1). It supersedes 1.3.0, which was prepared but
+never submitted, so this submission carries the fixes from both. 1.3.0's fix is
+summarised second below; the new 1.3.1 material comes first.
 
-It corrects a substantive statistical error in the package's core
-functionality: the variance decomposition returned incorrect components for
-any model carrying a residual autocorrelation term. Users of `ar()` / `ma()` /
-`arma()` / `cosy()` / `unstr()` / `sar()` / `car()` models should re-run their
-analyses. Models without an autocorrelation term are unaffected — all three
-changes below are provably no-ops in that case.
+**Please note a deliberate change in default output.** `shelf_life()` now
+requires a threshold crossing to persist before reporting it as a forecast
+horizon, and no longer extrapolates a trend that is statistically
+indistinguishable from flat. Both changes correct results that were wrong
+rather than merely conservative, so a horizon computed with 1.2.x or 1.3.0
+should be recomputed rather than trusted. The previous behaviour remains
+reachable via `min_run = 1` and `projection_alpha = 1`. I have kept this as a
+patch release because it is a defect fix and the old behaviour is fully
+recoverable, but I am flagging the behaviour change explicitly rather than
+leaving a reviewer to discover it.
 
-## The bug, and how it was found
+## 1.3.1 — two defects in `shelf_life()`
 
-`decompose_uncertainty()` computed the environmental variance component as
-`Var(perturbed linear predictor) - Var(unperturbed linear predictor)`. The
-first array was built internally from the posterior draws matrix and carried
-no autocorrelation term; the second came from `brms::posterior_linpred()`,
-which under brms's default `ar(cov = FALSE)` parameterisation *does* include
-the autocorrelation contribution to the mean. The subtraction therefore
-evaluated `V_env - V_AR`, which turns negative as the AR error grows and was
-then clamped to zero by a `pmax(., 0)` guard intended only to absorb Monte
-Carlo jitter.
+Both have the same shape: a noisy quantity promoted to a confident-looking
+number.
 
-The defect was invisible on inspection — the source comment asserted that
-"the mean structure carries no autocorrelation" — and was found by testing the
-package against a closed-form target instead. In a controlled AR(1) fit
-(phi = 0.9) whose analytic environmental variance is
-`beta^2 * delta^2 = 0.152`, the reported `env_var` averaged **0.012 and was
-floored to exactly zero at 13 of 15 lead times**; the corresponding iid
-control recovered 0.173 correctly. The same contamination inflated
-`param_var` by a factor of 8.9 at the far lead and drove `temporal_var` to
-**zero at every lead time** for a series with strong, unambiguous residual
-autocorrelation.
+* **The first threshold exceedance was reported as the horizon.** When the
+  CI-width / response-scale ratio hovers near the threshold without trending, a
+  single period exceeds it by chance. On a real 16-period series whose ratio sat
+  at ~0.92 throughout with exactly one excursion to 1.038, that excursion was
+  reported as a 12-period horizon. It was not reproducible: holding data, seed
+  and priors fixed and varying only sampler settings moved the answer between
+  "no crossing", a projection far outside the window, and two different crossing
+  periods. `shelf_life()` now requires `min_run` consecutive uninformative
+  periods (default 2). A crossing in force at the first lead is still detected,
+  and a dip inside an otherwise degrading series no longer resets the horizon.
 
-## Fixes
+* **The projection mode extrapolated slopes indistinguishable from flat.**
+  `min_slope_for_projection` is a magnitude gate only, so a slope of ~1e-3 with
+  a one-sided p-value of 0.42 cleared it and was extrapolated. On the same
+  series this produced a projected crossing 45 years out whose delta-method 95%
+  interval spanned 328 years and included the past. The projection now
+  additionally requires the slope to be significantly positive
+  (`projection_alpha`, default 0.05); when it is not, the result is a lower
+  bound, which is the honest answer for a forecast whose precision does not
+  degrade in-window.
 
-* Both `posterior_linpred()` calls now pass `incl_autocor = FALSE`, returning
-  the pure regression linear predictor. This is verified bit-identical to the
-  internally-constructed predictor, so the autocorrelation term cancels
-  exactly in the subtraction. `env_var` now recovers 0.145 against the 0.152
-  target with no floored rows; `param_var` is flat in lead time as it should
-  be; `temporal_var` grows monotonically and is correctly zero at lead 1.
+Every horizon now also carries exceedance diagnostics (`n_exceedances`,
+`frac_exceedance`, `first_exceedance`, `min_run`, and `slope`/`slope_p` in trend
+mode), so an isolated excursion is visible rather than silent.
 
-* `var_trim` (new argument to `et_predict()`, default `0`) applies a single
-  variance estimator to every channel. Previously the posterior-predictive
-  variance was winsorized while the parameter and environmental terms were
-  not, so `temporal_var` was a difference between two different estimators,
-  biased low by roughly the amount the winsorization removed.
+New regression tests in `tests/testthat/test-shelf-life-sustained.R` pin the
+defect using the real trajectory that exposed it, and assert that `min_run = 1`
+and `projection_alpha = 1` reproduce the previous behaviour exactly.
 
-* `ar_prior` (new argument to `et_fit()`, default `"weakly_informative"`)
-  replaces brms's flat, unbounded prior on autocorrelation coefficients with
-  `normal(0, 0.5)`, and `et_fit()` now warns when more than 5% of the
-  posterior lies at `|phi| >= 1`. On a short series the unbounded default
-  routinely yields posteriors straddling the unit root, where the k-step
-  forecast variance diverges. `ar_prior = "stationary"` truncates to
-  `(-1, 1)`; `ar_prior = "flat"` restores the previous behaviour.
+## 1.3.0 — variance decomposition under autocorrelation
 
-* `env_var`'s zero-floor is now instrumented: `decompose_uncertainty()` warns
-  when the floor fires on rows whose shortfall exceeds twice its own Monte
-  Carlo standard error, i.e. more systematically than jitter explains. The
-  silent floor is what concealed the bug above.
+`decompose_uncertainty()` returned incorrect components for any model carrying a
+residual autocorrelation term. It computed the environmental component as
+`Var(perturbed linear predictor) - Var(unperturbed linear predictor)`. The first
+array was built internally and carried no autocorrelation term; the second came
+from `brms::posterior_linpred()`, which under brms's default `ar(cov = FALSE)`
+parameterisation *does* include the autocorrelation contribution to the mean.
+The subtraction therefore evaluated `V_env - V_AR`, which turns negative as the
+AR error grows and was clamped to zero by a `pmax(., 0)` guard intended only for
+Monte Carlo jitter.
 
-New regression tests in `tests/testthat/test-decompose-autocor.R` fail on the
-old behaviour and pass on the new. `tests/manual/` holds the two standalone
-reproduction scripts. See NEWS.md for the full entry.
+The defect was invisible on inspection — the source comment asserted that "the
+mean structure carries no autocorrelation" — and was found by testing against a
+closed-form target. In a controlled AR(1) fit (phi = 0.9) whose analytic
+environmental variance is 0.152, the reported `env_var` averaged 0.012 and was
+floored to exactly zero at 13 of 15 lead times; the iid control recovered 0.173
+correctly.
+
+Fixes: both `posterior_linpred()` calls now pass `incl_autocor = FALSE` (verified
+bit-identical to the internal predictor, so the AR term cancels exactly);
+`var_trim` applies one variance estimator to every channel; `ar_prior` replaces
+brms's flat unbounded AR prior with `normal(0, 0.5)` and warns near the unit
+root; and the zero-floor is instrumented to warn when it fires more
+systematically than jitter explains. Models without an autocorrelation term are
+unaffected — these are provably no-ops in that case.
 
 ## Test environments
 
@@ -73,32 +85,35 @@ reproduction scripts. See NEWS.md for the full entry.
 
 `R CMD check --as-cran --run-donttest` on the built tarball:
 
-0 errors | 0 warnings | 1 note
+0 errors | 0 warnings | 2 notes
 
-The note is the expected one for a Stan-backed package:
+**Note 1 — days since last update.** This flags submission cadence, not a code
+issue. If it is too soon after the previous version, I am happy to wait and
+resubmit; please tell me the preferred interval.
+
+**Note 2 — slow examples.** The expected note for a Stan-backed package:
 
 ```
 * checking examples ... NOTE
 Examples with CPU (user + system) or elapsed time > 5s
                         user system elapsed
-decompose_uncertainty 55.095  2.676  58.800
-et_calibrate          51.304  2.301  53.721
-shelf_life            51.136  2.310  53.537
-et_fit                49.957  2.267  52.356
+decompose_uncertainty 46.682  2.472  49.290
+et_calibrate          43.743  2.238  46.214
+shelf_life            43.358  2.258  45.770
+et_fit                42.390  2.237  44.729
 ```
 
 These four examples each fit one Bayesian model, so almost all of that time is
 Stan model **compilation** rather than computation. The examples are already
 minimal — 20 observations, one predictor, a single chain of 500 iterations, of
 which sampling accounts for under a second — so the cost is not reducible by
-shrinking them further. They are wrapped in `\donttest{}`. This note was
-present in the previously accepted 1.2.x releases and no example has been
-added or enlarged since.
+shrinking them further. They are wrapped in `\donttest{}`. This note was present
+in the previously accepted 1.2.x releases and no example has been added or
+enlarged since.
 
 For context on total check time: the `testthat` suite is gated with
-`skip_on_cran()`, so it runs in about 4 seconds under CRAN's settings (341
-seconds locally with `NOT_CRAN=true`, as reported above). Vignettes do not fit
-models at build time.
+`skip_on_cran()`, so it runs in about 4 seconds under CRAN's settings (507 tests
+locally with `NOT_CRAN=true`). Vignettes do not fit models at build time.
 
 ## Reverse dependencies
 

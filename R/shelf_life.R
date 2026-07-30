@@ -22,18 +22,29 @@
 #'
 #' \describe{
 #'   \item{\strong{Observed}}{The threshold is crossed within the
-#'     forecast/validation window.  The shelf life is the first time point
-#'     at which \code{ratio >= threshold}.}
-#'   \item{\strong{Projected}}{All forecast periods remain informative but
-#'     the CI/range ratio is trending upward.  A linear trend is fitted to
-#'     the ratios and extrapolated to estimate when the threshold would be
-#'     reached.  The projected crossing time \eqn{t^* = (\tau - a) / b}
-#'     (where \eqn{\tau} is the threshold, \eqn{a} the fitted intercept,
-#'     \eqn{b} the fitted slope) is reported together with a Monte Carlo
-#'     standard error \code{se_t_star} derived via the delta method.}
-#'   \item{\strong{Lower bound}}{All forecast periods are informative with
-#'     no upward trend in the ratio.  The shelf life is reported as a lower
-#'     bound: \code{> last observed time}.}
+#'     forecast/validation window \emph{and the crossing persists}.  The
+#'     shelf life is the first time point beginning a run of \code{min_run}
+#'     consecutive periods with \code{ratio >= threshold}.  Requiring
+#'     persistence matters: when the ratio hovers near \code{threshold}
+#'     without trending, a single noisy period can exceed it by chance, and
+#'     the first-exceedance rule used before ErrorTracer 1.3.1 would report
+#'     that excursion as a horizon.  Isolated exceedances are now reported in
+#'     the horizon diagnostics (\code{n_exceedances},
+#'     \code{first_exceedance}) instead of being promoted to a crossing.}
+#'   \item{\strong{Projected}}{No sustained crossing occurs in-window but the
+#'     CI/range ratio is trending upward \emph{detectably} --- the fitted
+#'     slope must exceed \code{min_slope_for_projection} \strong{and} be
+#'     significantly positive at \code{projection_alpha}.  A linear trend is
+#'     extrapolated to estimate when the threshold would be reached.  The
+#'     projected crossing time \eqn{t^* = (\tau - a) / b} (where \eqn{\tau}
+#'     is the threshold, \eqn{a} the fitted intercept, \eqn{b} the fitted
+#'     slope) is reported together with a standard error \code{se_t_star}
+#'     derived via the delta method.}
+#'   \item{\strong{Lower bound}}{No sustained crossing and no trend
+#'     distinguishable from flat (or a projection beyond the extrapolation
+#'     cap).  The shelf life is reported as a lower bound:
+#'     \code{> last observed time}.  This is the honest outcome for a
+#'     forecast whose precision simply does not degrade in-window.}
 #' }
 #'
 #' The intended workflow is:
@@ -77,6 +88,20 @@
 #'   \code{max(time) + max_extrapolation_factor * (max(time) - min(time))},
 #'   the result is reported as a lower bound instead of a projection.
 #'   Set to \code{Inf} to disable the cap.  Default \code{10}.
+#' @param min_run Integer.  Number of \emph{consecutive} uninformative
+#'   periods required before the threshold counts as crossed (default
+#'   \code{2}).  Guards against a single noisy period manufacturing a
+#'   horizon when the ratio hovers near \code{threshold}.  Set
+#'   \code{min_run = 1} to recover the pre-1.3.1 first-exceedance
+#'   behaviour; raise it for noisier series.
+#' @param projection_alpha Numeric.  Significance level for the one-sided
+#'   test that the fitted ratio-vs-time slope is positive (default
+#'   \code{0.05}).  A slope can clear \code{min_slope_for_projection} while
+#'   being statistically indistinguishable from flat; extrapolating it
+#'   yields a confident-looking crossing time whose interval may span
+#'   centuries and include the past.  When the slope fails this test the
+#'   result is reported as a lower bound instead of a projection.  Set to
+#'   \code{1} to disable the test and recover the pre-1.3.1 behaviour.
 #' @param ... Unused.
 #' @param plausible_range Deprecated.  Use \code{response_scale} instead.
 #'
@@ -95,7 +120,12 @@
 #'     \item{\code{horizon}}{Named list with elements \code{value},
 #'       \code{type} (\code{"observed"}, \code{"projected"}, or
 #'       \code{"lower_bound"}), \code{last_informative},
-#'       \code{description}, and (for projected) \code{se_t_star}.}
+#'       \code{description}, (for projected) \code{se_t_star}, and the
+#'       exceedance diagnostics \code{n_exceedances},
+#'       \code{frac_exceedance}, \code{first_exceedance} and
+#'       \code{min_run}.  Comparing \code{first_exceedance} with
+#'       \code{value} shows whether the reported horizon rests on a
+#'       persistent crossing or whether isolated excursions preceded it.}
 #'     \item{\code{horizon_by_group}}{For grouped objects: named list of
 #'       per-group horizon lists.}
 #'     \item{\code{threshold}}{The threshold value used.}
@@ -128,6 +158,8 @@ shelf_life <- function(predictions,
                        skill = NULL,
                        min_slope_for_projection = 1e-4,
                        max_extrapolation_factor = 10,
+                       min_run = 2L,
+                       projection_alpha = 0.05,
                        ...,
                        plausible_range = NULL) {
   # Deprecated alias: plausible_range -> response_scale. Re-call (rather than
@@ -150,6 +182,8 @@ shelf_life <- function(predictions,
       skill                    = skill,
       min_slope_for_projection = min_slope_for_projection,
       max_extrapolation_factor = max_extrapolation_factor,
+      min_run                  = min_run,
+      projection_alpha         = projection_alpha,
       ...
     ))
   }
@@ -165,6 +199,8 @@ shelf_life.et_prediction <- function(predictions,
                                      skill = NULL,
                                      min_slope_for_projection = 1e-4,
                                      max_extrapolation_factor = 10,
+                                     min_run = 2L,
+                                     projection_alpha = 0.05,
                                      ...,
                                      plausible_range = NULL) {
   skill_ok <- if (!is.null(skill)) .skill_ok_vector(skill) else NULL
@@ -176,7 +212,9 @@ shelf_life.et_prediction <- function(predictions,
     time_col = time_col,
     skill_ok = skill_ok,
     min_slope_for_projection = min_slope_for_projection,
-    max_extrapolation_factor = max_extrapolation_factor
+    max_extrapolation_factor = max_extrapolation_factor,
+    min_run = min_run,
+    projection_alpha = projection_alpha
   )
 }
 
@@ -189,6 +227,8 @@ shelf_life.et_prediction_list <- function(predictions,
                                           skill = NULL,
                                           min_slope_for_projection = 1e-4,
                                           max_extrapolation_factor = 10,
+                                          min_run = 2L,
+                                          projection_alpha = 0.05,
                                           ...,
                                           plausible_range = NULL) {
   horizon_by_group <- list()
@@ -210,7 +250,9 @@ shelf_life.et_prediction_list <- function(predictions,
       pred, response_scale, ci_level, threshold,
       time_col, skill_ok = skill_ok_g,
       min_slope_for_projection = min_slope_for_projection,
-      max_extrapolation_factor = max_extrapolation_factor
+      max_extrapolation_factor = max_extrapolation_factor,
+      min_run = min_run,
+      projection_alpha = projection_alpha
     )
     horizon_by_group[[g]] <<- attr(sl, "horizon")
     cbind(data.frame(group = g, stringsAsFactors = FALSE), sl)
@@ -236,7 +278,9 @@ shelf_life.default <- function(predictions, ...) {
                                         ci_level, threshold, time_col,
                                         skill_ok = NULL,
                                         min_slope_for_projection,
-                                        max_extrapolation_factor = 10) {
+                                        max_extrapolation_factor = 10,
+                                        min_run = 2L,
+                                        projection_alpha = 0.05) {
   ci_df <- predictions$credible_intervals
   avail_levels <- unique(ci_df$ci_level)
 
@@ -305,7 +349,8 @@ shelf_life.default <- function(predictions, ...) {
 
   # Compute shelf life horizon
   horizon <- .compute_horizon(result_df, threshold, min_slope_for_projection,
-                              max_extrapolation_factor)
+                              max_extrapolation_factor, min_run = min_run,
+                              projection_alpha = projection_alpha)
 
   result <- structure(result_df, class = c("et_shelf_life", "data.frame"))
   attr(result, "horizon") <- horizon
@@ -343,34 +388,106 @@ shelf_life.default <- function(predictions, ...) {
 # Internal: derive horizon from a single-group shelf-life table
 # ______________________________________________________________________________
 
+
+# First index at which `min_run` consecutive periods are all uninformative.
+# Returns NA_integer_ when no such run exists. min_run = 1 reproduces the
+# historical first-exceedance behaviour.
+.first_sustained_index <- function(uninformative, min_run) {
+  n <- length(uninformative)
+  if (n == 0L) return(NA_integer_)
+  if (min_run <= 1L) {
+    return(if (any(uninformative)) which(uninformative)[1] else NA_integer_)
+  }
+  if (n < min_run) return(NA_integer_)
+  for (i in seq_len(n - min_run + 1L)) {
+    if (all(uninformative[i:(i + min_run - 1L)])) return(i)
+  }
+  NA_integer_
+}
+
 .compute_horizon <- function(sl_df, threshold, min_slope,
-                             max_extrapolation_factor = 10) {
+                             max_extrapolation_factor = 10,
+                             min_run = 2L,
+                             projection_alpha = 0.05) {
   times <- sl_df$time
   ratios <- sl_df$ratio
   informative <- sl_df$informative
+  uninformative <- !informative
 
-  # --- Mode 1: threshold already crossed ---
-  if (any(!informative)) {
-    first_cross  <- min(times[!informative])
-    last_ok      <- if (any(informative)) max(times[informative]) else NA_real_
-    return(list(
+  # Diagnostics reported on every horizon, so an isolated excursion is visible
+  # rather than silently promoted to a horizon (which the first-exceedance rule
+  # used to do: a single noisy year manufactured a shelf life).
+  n_exceed     <- sum(uninformative)
+  first_exceed <- if (n_exceed > 0L) min(times[uninformative]) else NA_real_
+  diag_fields  <- list(
+    n_exceedances    = n_exceed,
+    frac_exceedance  = n_exceed / length(uninformative),
+    first_exceedance = first_exceed,
+    min_run          = min_run
+  )
+
+  # --- Mode 1: threshold crossed and the crossing is SUSTAINED ---
+  idx <- .first_sustained_index(uninformative, min_run)
+  if (!is.na(idx)) {
+    first_cross <- times[idx]
+    last_ok     <- if (any(informative & seq_along(times) < idx)) {
+      max(times[informative & seq_along(times) < idx])
+    } else NA_real_
+    return(c(list(
       value = first_cross,
       type = "observed",
       last_informative = last_ok,
       description = paste0(
-        "Threshold (ratio >= ", threshold, ") first exceeded at ",
-        first_cross, "."
+        "Threshold (ratio >= ", threshold, ") sustained (>= ", min_run,
+        " consecutive periods) from ", first_cross, "."
       )
-    ))
+    ), diag_fields))
   }
 
-  # --- Mode 2: all informative -- try linear extrapolation ---
+  # No sustained crossing. Any exceedances present are isolated excursions, so
+  # fall through to the trend modes rather than reporting a spurious horizon.
+  isolated_note <- if (n_exceed > 0L) {
+    paste0(" ", n_exceed, " isolated exceedance(s) (first at ", first_exceed,
+           ") did not persist for ", min_run,
+           " consecutive periods and are not treated as a crossing.")
+  } else ""
+
+  # --- Mode 2: no sustained crossing -- try linear extrapolation ---
   last_ok <- max(times)
 
   if (is.numeric(times) && length(times) >= 3) {
     lm_fit <- suppressWarnings(lm(ratios ~ times))
     slope <- coef(lm_fit)[["times"]]
     b0 <- coef(lm_fit)[["(Intercept)"]]
+
+    # The magnitude gate alone is not enough: a slope of 1e-3 clears it while
+    # being statistically indistinguishable from flat, and extrapolating such a
+    # slope yields a confident-looking t* whose interval can span centuries and
+    # include the past. Require the slope to be significantly positive as well.
+    slope_p <- tryCatch({
+      cf <- suppressWarnings(summary(lm_fit))$coefficients
+      stats::pt(cf["times", "t value"], df = lm_fit$df.residual,
+                lower.tail = FALSE)          # one-sided: slope > 0
+    }, error = function(e) NA_real_)
+    slope_flat <- is.na(slope_p) || slope_p > projection_alpha
+
+    if (!is.na(slope) && slope > min_slope && slope_flat) {
+      return(c(list(
+        value = NA_real_,
+        type = "lower_bound",
+        last_informative = last_ok,
+        slope = slope,
+        slope_p = slope_p,
+        description = paste0(
+          "No sustained exceedance across ", nrow(sl_df),
+          " forecast periods. The CI/range ratio has no trend distinguishable ",
+          "from flat (slope = ", round(slope, 5), ", one-sided p = ",
+          signif(slope_p, 2), " > ", projection_alpha,
+          "), so no crossing is projected. Shelf life > ", last_ok, ".",
+          isolated_note
+        )
+      ), diag_fields))
+    }
 
     if (!is.na(slope) && slope > min_slope) {
       proj <- (threshold - b0) / slope
@@ -389,46 +506,51 @@ shelf_life.default <- function(predictions, ...) {
       cap_time <- max(times) + max_extrapolation_factor * window
 
       if (is.finite(max_extrapolation_factor) && proj > cap_time) {
-        return(list(
+        return(c(list(
           value = NA_real_,
           type = "lower_bound",
           last_informative = last_ok,
+          slope = slope,
+          slope_p = slope_p,
           description = paste0(
-            "All ", nrow(sl_df), " forecast periods informative. ",
-            "Linear trend (slope = ", round(slope, 5), " per time unit) ",
-            "projects threshold crossing at ~", round(proj, 1),
+            "No sustained exceedance across ", nrow(sl_df),
+            " forecast periods. Linear trend (slope = ", round(slope, 5),
+            " per time unit) projects threshold crossing at ~", round(proj, 1),
             ", but this exceeds the extrapolation cap (",
-            round(cap_time, 1), "). Shelf life > ", last_ok, "."
+            round(cap_time, 1), "). Shelf life > ", last_ok, ".",
+            isolated_note
           )
-        ))
+        ), diag_fields))
       }
 
-      return(list(
+      return(c(list(
         value = proj,
         type = "projected",
         last_informative = last_ok,
         se_t_star = se_t_star,
         slope = slope,
+        slope_p = slope_p,
         description = paste0(
-          "All ", nrow(sl_df), " forecast periods informative. ",
-          "Linear trend (slope = ", round(slope, 5), " per time unit) ",
-          "projects threshold crossing at ~", round(proj, 1),
-          " (SE = ", round(se_t_star, 2), ")."
+          "No sustained exceedance across ", nrow(sl_df),
+          " forecast periods. Linear trend (slope = ", round(slope, 5),
+          " per time unit) projects threshold crossing at ~", round(proj, 1),
+          " (SE = ", round(se_t_star, 2), ").", isolated_note
         )
-      ))
+      ), diag_fields))
     }
   }
 
   # --- Mode 3: no upward trend -- lower bound only ---
-  list(
+  c(list(
     value = NA_real_,
     type = "lower_bound",
     last_informative = last_ok,
     description = paste0(
-      "All ", nrow(sl_df), " forecast periods informative with no ",
-      "upward trend in CI/range ratio. Shelf life > ", last_ok, "."
+      "No sustained exceedance across ", nrow(sl_df),
+      " forecast periods and no upward trend in CI/range ratio. ",
+      "Shelf life > ", last_ok, ".", isolated_note
     )
-  )
+  ), diag_fields)
 }
 
 # ******************************************************************************

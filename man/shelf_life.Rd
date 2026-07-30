@@ -13,6 +13,8 @@ shelf_life(
   skill = NULL,
   min_slope_for_projection = 1e-04,
   max_extrapolation_factor = 10,
+  min_run = 2L,
+  projection_alpha = 0.05,
   ...,
   plausible_range = NULL
 )
@@ -57,6 +59,22 @@ crossing time exceeds
 the result is reported as a lower bound instead of a projection.
 Set to \code{Inf} to disable the cap.  Default \code{10}.}
 
+\item{min_run}{Integer.  Number of \emph{consecutive} uninformative
+periods required before the threshold counts as crossed (default
+\code{2}).  Guards against a single noisy period manufacturing a
+horizon when the ratio hovers near \code{threshold}.  Set
+\code{min_run = 1} to recover the pre-1.3.1 first-exceedance
+behaviour; raise it for noisier series.}
+
+\item{projection_alpha}{Numeric.  Significance level for the one-sided
+test that the fitted ratio-vs-time slope is positive (default
+\code{0.05}).  A slope can clear \code{min_slope_for_projection} while
+being statistically indistinguishable from flat; extrapolating it
+yields a confident-looking crossing time whose interval may span
+centuries and include the past.  When the slope fails this test the
+result is reported as a lower bound instead of a projection.  Set to
+\code{1} to disable the test and recover the pre-1.3.1 behaviour.}
+
 \item{...}{Unused.}
 
 \item{plausible_range}{Deprecated.  Use \code{response_scale} instead.}
@@ -77,7 +95,12 @@ An \code{et_shelf_life} object (a \code{data.frame}) with columns:
     \item{\code{horizon}}{Named list with elements \code{value},
       \code{type} (\code{"observed"}, \code{"projected"}, or
       \code{"lower_bound"}), \code{last_informative},
-      \code{description}, and (for projected) \code{se_t_star}.}
+      \code{description}, (for projected) \code{se_t_star}, and the
+      exceedance diagnostics \code{n_exceedances},
+      \code{frac_exceedance}, \code{first_exceedance} and
+      \code{min_run}.  Comparing \code{first_exceedance} with
+      \code{value} shows whether the reported horizon rests on a
+      persistent crossing or whether isolated excursions preceded it.}
     \item{\code{horizon_by_group}}{For grouped objects: named list of
       per-group horizon lists.}
     \item{\code{threshold}}{The threshold value used.}
@@ -105,18 +128,29 @@ whether the uninformative threshold is crossed within the forecast window:
 
 \describe{
   \item{\strong{Observed}}{The threshold is crossed within the
-    forecast/validation window.  The shelf life is the first time point
-    at which \code{ratio >= threshold}.}
-  \item{\strong{Projected}}{All forecast periods remain informative but
-    the CI/range ratio is trending upward.  A linear trend is fitted to
-    the ratios and extrapolated to estimate when the threshold would be
-    reached.  The projected crossing time \eqn{t^* = (\tau - a) / b}
-    (where \eqn{\tau} is the threshold, \eqn{a} the fitted intercept,
-    \eqn{b} the fitted slope) is reported together with a Monte Carlo
-    standard error \code{se_t_star} derived via the delta method.}
-  \item{\strong{Lower bound}}{All forecast periods are informative with
-    no upward trend in the ratio.  The shelf life is reported as a lower
-    bound: \code{> last observed time}.}
+    forecast/validation window \emph{and the crossing persists}.  The
+    shelf life is the first time point beginning a run of \code{min_run}
+    consecutive periods with \code{ratio >= threshold}.  Requiring
+    persistence matters: when the ratio hovers near \code{threshold}
+    without trending, a single noisy period can exceed it by chance, and
+    the first-exceedance rule used before ErrorTracer 1.3.1 would report
+    that excursion as a horizon.  Isolated exceedances are now reported in
+    the horizon diagnostics (\code{n_exceedances},
+    \code{first_exceedance}) instead of being promoted to a crossing.}
+  \item{\strong{Projected}}{No sustained crossing occurs in-window but the
+    CI/range ratio is trending upward \emph{detectably} --- the fitted
+    slope must exceed \code{min_slope_for_projection} \strong{and} be
+    significantly positive at \code{projection_alpha}.  A linear trend is
+    extrapolated to estimate when the threshold would be reached.  The
+    projected crossing time \eqn{t^* = (\tau - a) / b} (where \eqn{\tau}
+    is the threshold, \eqn{a} the fitted intercept, \eqn{b} the fitted
+    slope) is reported together with a standard error \code{se_t_star}
+    derived via the delta method.}
+  \item{\strong{Lower bound}}{No sustained crossing and no trend
+    distinguishable from flat (or a projection beyond the extrapolation
+    cap).  The shelf life is reported as a lower bound:
+    \code{> last observed time}.  This is the honest outcome for a
+    forecast whose precision simply does not degrade in-window.}
 }
 
 The intended workflow is:

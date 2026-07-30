@@ -1,10 +1,57 @@
+# ErrorTracer 1.3.1
+
+Corrects `shelf_life()`, which could report a forecast horizon that rested on a
+single noisy period. **Any reported shelf life should be re-checked**; series
+whose CI-width / response-scale ratio degrades monotonically are unaffected.
+
+## Bug fixes
+
+* **`shelf_life()` reported the first threshold exceedance as the horizon.**
+  When the ratio hovers near `threshold` without trending, one period can
+  exceed it by chance, and that isolated excursion was promoted to a "shelf
+  life". Observed on a real series whose ratio sat at ~0.92 across a 16-period
+  window with a single excursion to 1.038: the reported horizon was not
+  reproducible across sampler settings, varying between "no crossing", a
+  projection far outside the window, and two different crossing periods, from
+  MCMC noise alone.
+
+  `shelf_life()` now requires the exceedance to **persist**. The new `min_run`
+  argument (default `2`) sets how many consecutive uninformative periods
+  constitute a crossing; `min_run = 1` restores the previous behaviour. A
+  crossing already in force at the first lead is still detected, and a dip
+  inside an otherwise degrading series no longer resets the horizon.
+
+* **The projection mode extrapolated slopes indistinguishable from flat.**
+  `min_slope_for_projection` is a magnitude gate only, so a slope of ~1e-3 with
+  a one-sided p-value of 0.42 cleared it and was extrapolated to a
+  confident-looking crossing time. On the same real series above this produced a
+  projected horizon 45 years out whose delta-method 95% interval spanned 328
+  years and **included the past**. The projection now additionally requires the
+  slope to be significantly positive, controlled by the new `projection_alpha`
+  argument (default `0.05`); when it is not, the result is reported as a lower
+  bound — the honest outcome for a forecast whose precision does not degrade
+  in-window. Set `projection_alpha = 1` to restore the previous behaviour.
+
+  The two fixes compose: a series that neither sustains a crossing nor trends
+  detectably now returns `lower_bound` instead of either a spurious observed
+  horizon or a spurious projection.
+
+## New features
+
+* **Exceedance diagnostics on every horizon.** The `horizon` attribute now
+  carries `n_exceedances`, `frac_exceedance`, `first_exceedance` and `min_run`
+  alongside `value` and `type`, so an isolated excursion is visible rather than
+  silent. Comparing `first_exceedance` with `value` shows directly whether a
+  horizon rests on a persistent crossing. Trend-mode horizons additionally carry
+  `slope` and `slope_p`.
+
 # ErrorTracer 1.3.0
 
 Corrects the variance decomposition for models carrying a residual
 autocorrelation term. **Any analysis using `ar()` / `ma()` / `arma()` /
 `cosy()` / `unstr()` / `sar()` / `car()` must be re-run**; iid models are
 unaffected (all three changes below are no-ops without an autocorrelation
-term). Note that 1.2.1, currently under CRAN review, ships the defect.
+term). Note that 1.2.1 ships the defect.
 
 
 ## Bug fixes — variance decomposition under autocorrelation
