@@ -17,8 +17,8 @@
 #' \eqn{1 - \mathrm{CRPS_{model}} / \mathrm{CRPS_{null}}} (positive when the
 #' model beats the null).  This is the accuracy-relative counterpart to
 #' \code{\link{shelf_life}}'s precision criterion; report both.  The
-#' \strong{forecast limit} --- the first lead time at which skill drops to zero
-#' --- is attached as an attribute.
+#' \strong{forecast limit} --- the first lead time beginning a sustained run of
+#' non-skillful periods --- is attached as an attribute.
 #'
 #' @param predictions An \code{et_prediction} or \code{et_prediction_list}.
 #' @param observed A \code{data.frame} of true responses positionally matched to
@@ -36,19 +36,27 @@
 #' @param rw_sd,rw_start Optional random-walk per-step innovation SD and start
 #'   value.  Default to \code{sd(diff(train_response))} and the last training
 #'   response, respectively.
+#' @param min_run Integer.  Number of \emph{consecutive} non-skillful periods
+#'   required before the forecast limit is declared (default \code{2}).  Skill
+#'   near zero crosses by chance, and a bare first-crossing rule
+#'   (\code{min_run = 1}, the previous behaviour) promotes a lone dip to a
+#'   horizon --- the same failure mode \code{\link{shelf_life}} guards against.
+#'   Isolated dips are still reported via \code{n_below} / \code{first_below}.
 #' @param ... Unused.
 #' @return A \code{data.frame} with columns \code{obs_id}, \code{time},
 #'   \code{crps_model}, \code{crps_null}, \code{skill}, and \code{skillful}
 #'   (\code{skill > 0}); a leading \code{group} column for grouped input.  The
 #'   attribute \code{"forecast_limit"} holds a list with the null-relative
-#'   horizon (first non-skillful lead time), or is per-group for grouped input.
+#'   horizon, its \code{type} (\code{"observed"} or \code{"lower_bound"}), and
+#'   the diagnostics \code{n_below}, \code{first_below} and \code{min_run};
+#'   or is per-group for grouped input.
 #' @seealso \code{\link{shelf_life}}, \code{\link{et_calibrate}}
 #' @export
 et_skill_score <- function(predictions, observed, response_col = NULL,
                            time_col = NULL,
                            null = c("climatology", "random_walk"),
                            climatology = NULL, rw_sd = NULL, rw_start = NULL,
-                           ...) {
+                           min_run = 2L, ...) {
   UseMethod("et_skill_score")
 }
 
@@ -57,7 +65,7 @@ et_skill_score.et_prediction <- function(predictions, observed,
                                           response_col = NULL, time_col = NULL,
                                           null = c("climatology", "random_walk"),
                                           climatology = NULL, rw_sd = NULL,
-                                          rw_start = NULL, ...) {
+                                          rw_start = NULL, min_run = 2L, ...) {
   null <- match.arg(null)
   response_col <- .resolve_response_col(response_col, predictions$model)
   if (nrow(observed) != nrow(predictions$newdata)) {
@@ -79,7 +87,8 @@ et_skill_score.et_prediction <- function(predictions, observed,
     train_resp  = train_resp,
     climatology = climatology,
     rw_sd       = rw_sd,
-    rw_start    = rw_start
+    rw_start    = rw_start,
+    min_run     = min_run
   )
   structure(res$df, forecast_limit = res$limit, null_model = null)
 }
@@ -90,7 +99,7 @@ et_skill_score.et_prediction_list <- function(predictions, observed,
                                                time_col = NULL,
                                                null = c("climatology", "random_walk"),
                                                climatology = NULL, rw_sd = NULL,
-                                               rw_start = NULL, ...) {
+                                               rw_start = NULL, min_run = 2L, ...) {
   null <- match.arg(null)
   grouping <- predictions$grouping
   if (!grouping %in% colnames(observed)) {
@@ -109,7 +118,8 @@ et_skill_score.et_prediction_list <- function(predictions, observed,
       draws       = pred$predictive_draws %||% pred$posterior_predict,
       y_true      = y_true, newdata = pred$newdata, time_col = time_col,
       null = null, train_resp = .training_response(pred$model, rc),
-      climatology = climatology, rw_sd = rw_sd, rw_start = rw_start)
+      climatology = climatology, rw_sd = rw_sd, rw_start = rw_start,
+      min_run = min_run)
     limit_by_group[[g]] <<- res$limit
     cbind(data.frame(group = g, stringsAsFactors = FALSE), res$df)
   })
@@ -128,7 +138,8 @@ et_skill_score.et_prediction_list <- function(predictions, observed,
 }
 
 .compute_skill <- function(draws, y_true, newdata, time_col, null,
-                           train_resp, climatology, rw_sd, rw_start) {
+                           train_resp, climatology, rw_sd, rw_start,
+                           min_run = 2L) {
   n <- length(y_true)
   time_vals <- if (!is.null(time_col) && time_col %in% colnames(newdata)) {
     newdata[[time_col]]
@@ -176,17 +187,30 @@ et_skill_score.et_prediction_list <- function(predictions, observed,
     stringsAsFactors = FALSE
   )
 
-  # Forecast limit: first lead time that is not skillful.
-  not_ok <- which(!df$skillful & !is.na(df$skill))
-  limit <- if (length(not_ok)) {
-    list(value = df$time[not_ok[1]], type = "observed",
+  # Forecast limit: the first lead time beginning a SUSTAINED run of
+  # non-skillful periods. A bare first-crossing rule has the same failure mode
+  # here that it has in shelf_life(): when skill hovers near zero without
+  # trending, one lead dips below by chance and is promoted to "the horizon".
+  # Kyoto against climatology is a live example -- mean skill is comfortably
+  # positive across the window, yet a single negative lead would set the limit
+  # at the seventh forecast year. Isolated dips are still reported, as
+  # diagnostics, so they are visible rather than silently load-bearing.
+  not_ok      <- !df$skillful & !is.na(df$skill)
+  first_below <- if (any(not_ok)) df$time[which(not_ok)[1]] else NA
+  idx         <- .first_sustained_index(not_ok, min_run)
+  limit <- if (!is.na(idx)) {
+    list(value = df$time[idx], type = "observed",
+         n_below = sum(not_ok), first_below = first_below, min_run = min_run,
          description = paste0("Model stops beating the ", null,
-                              " null at time ", df$time[not_ok[1]], "."))
+                              " null at time ", df$time[idx],
+                              " (sustained over ", min_run, " periods)."))
   } else {
     list(value = NA_real_, type = "lower_bound",
+         n_below = sum(not_ok), first_below = first_below, min_run = min_run,
          description = paste0("Model beats the ", null,
-                              " null at every forecast step (limit > ",
-                              max(df$time), ")."))
+                              " null throughout (limit > ", max(df$time),
+                              "); ", sum(not_ok), " isolated non-skillful ",
+                              "period(s) did not persist for ", min_run, "."))
   }
   list(df = df, limit = limit)
 }

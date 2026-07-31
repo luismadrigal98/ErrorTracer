@@ -13,6 +13,7 @@ et_skill_score(
   climatology = NULL,
   rw_sd = NULL,
   rw_start = NULL,
+  min_run = 2L,
   ...
 )
 }
@@ -40,6 +41,13 @@ reference distribution.  Defaults to the training response values.}
 value.  Default to \code{sd(diff(train_response))} and the last training
 response, respectively.}
 
+\item{min_run}{Integer.  Number of \emph{consecutive} non-skillful periods
+required before the forecast limit is declared (default \code{2}).  Skill
+near zero crosses by chance, and a bare first-crossing rule
+(\code{min_run = 1}, the previous behaviour) promotes a lone dip to a
+horizon --- the same failure mode \code{\link{shelf_life}} guards against.
+Isolated dips are still reported via \code{n_below} / \code{first_below}.}
+
 \item{...}{Unused.}
 }
 \value{
@@ -47,7 +55,9 @@ A \code{data.frame} with columns \code{obs_id}, \code{time},
   \code{crps_model}, \code{crps_null}, \code{skill}, and \code{skillful}
   (\code{skill > 0}); a leading \code{group} column for grouped input.  The
   attribute \code{"forecast_limit"} holds a list with the null-relative
-  horizon (first non-skillful lead time), or is per-group for grouped input.
+  horizon, its \code{type} (\code{"observed"} or \code{"lower_bound"}), and
+  the diagnostics \code{n_below}, \code{first_below} and \code{min_run};
+  or is per-group for grouped input.
 }
 \description{
 Scores a forecast against a null model with the continuous ranked
@@ -55,8 +65,8 @@ probability score (CRPS) and returns the per-lead-time skill,
 \eqn{1 - \mathrm{CRPS_{model}} / \mathrm{CRPS_{null}}} (positive when the
 model beats the null).  This is the accuracy-relative counterpart to
 \code{\link{shelf_life}}'s precision criterion; report both.  The
-\strong{forecast limit} --- the first lead time at which skill drops to zero
---- is attached as an attribute.
+\strong{forecast limit} --- the first lead time beginning a sustained run of
+non-skillful periods --- is attached as an attribute.
 }
 \seealso{
 \code{\link{shelf_life}}, \code{\link{et_calibrate}}

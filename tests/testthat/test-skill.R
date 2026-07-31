@@ -81,6 +81,77 @@ test_that("random_walk null derives rw_sd/start from training when unspecified",
   expect_true(all(is.finite(sk$crps_null)))
 })
 
+# ── sustained forecast limit (regression: isolated dip must not set it) ──────
+#
+# Same defect class as shelf_life()'s first-exceedance bug: skill hovering near
+# zero crosses by chance, and a bare first-crossing rule promotes one lead to
+# "the forecast limit". Found on the real Kyoto/climatology comparison, whose
+# mean skill is comfortably positive across the window.
+
+.mock_skill_pred_with_dip <- function(bad_at, n = 10L, S = 1000L, seed = 11L) {
+  set.seed(seed)
+  train_y <- rnorm(400, 0, 3)                    # wide climatology
+  y_true  <- rnorm(n, 0, 0.2)
+  draws   <- sapply(seq_len(n), function(i) {
+    if (i %in% bad_at) rnorm(S, y_true[i] + 12, 0.2)  # confident and wrong
+    else               rnorm(S, y_true[i], 0.4)       # accurate and sharp
+  })
+  list(pred = .mock_skill_pred(draws, data.frame(x = seq_len(n), t = seq_len(n)),
+                               train_y),
+       y_true = y_true)
+}
+
+test_that("an isolated non-skillful lead does not set the forecast limit", {
+  f  <- .mock_skill_pred_with_dip(bad_at = 4L)
+  sk <- et_skill_score(f$pred, observed = data.frame(y = f$y_true),
+                       response_col = "y", time_col = "t", null = "climatology")
+  expect_false(sk$skillful[4])
+  expect_true(all(sk$skillful[-4]))
+
+  fl <- attr(sk, "forecast_limit")
+  expect_equal(fl$type, "lower_bound")   # NOT "observed" at t = 4
+  expect_true(is.na(fl$value))
+  expect_equal(fl$n_below, 1L)
+  expect_equal(fl$first_below, 4)        # the dip is reported, not hidden
+  expect_equal(fl$min_run, 2L)
+})
+
+test_that("min_run = 1 restores the first-crossing behaviour", {
+  f  <- .mock_skill_pred_with_dip(bad_at = 4L)
+  sk <- et_skill_score(f$pred, observed = data.frame(y = f$y_true),
+                       response_col = "y", time_col = "t", null = "climatology",
+                       min_run = 1L)
+  fl <- attr(sk, "forecast_limit")
+  expect_equal(fl$type, "observed")
+  expect_equal(fl$value, 4)
+})
+
+test_that("a sustained run of non-skillful leads does set the limit", {
+  f  <- .mock_skill_pred_with_dip(bad_at = c(6L, 7L, 8L))
+  sk <- et_skill_score(f$pred, observed = data.frame(y = f$y_true),
+                       response_col = "y", time_col = "t", null = "climatology")
+  fl <- attr(sk, "forecast_limit")
+  expect_equal(fl$type, "observed")
+  expect_equal(fl$value, 6)              # first lead of the run, not the last
+  expect_equal(fl$n_below, 3L)
+})
+
+test_that("min_run is honoured for grouped predictions", {
+  f1 <- .mock_skill_pred_with_dip(bad_at = 4L, seed = 11L)
+  f2 <- .mock_skill_pred_with_dip(bad_at = c(6L, 7L), seed = 12L)
+  plist <- structure(
+    list(predictions = list(A = f1$pred, B = f2$pred), grouping = "sp"),
+    class = "et_prediction_list")
+  obs <- rbind(data.frame(sp = "A", y = f1$y_true),
+               data.frame(sp = "B", y = f2$y_true))
+  sk <- et_skill_score(plist, observed = obs, response_col = "y",
+                       time_col = "t", null = "climatology")
+  lims <- attr(sk, "forecast_limit_by_group")
+  expect_equal(lims$A$type, "lower_bound")   # isolated dip
+  expect_equal(lims$B$type, "observed")      # sustained run
+  expect_equal(lims$B$value, 6)
+})
+
 # ── shelf_life() skill gate + default response_scale ─────────────────────────
 
 .mock_shelf_pred <- function(widths, train_y, times = seq_along(widths)) {

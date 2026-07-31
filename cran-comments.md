@@ -4,20 +4,22 @@ This is a bug-fix release (1.3.1). It supersedes 1.3.0, which was prepared but
 never submitted, so this submission carries the fixes from both. 1.3.0's fix is
 summarised second below; the new 1.3.1 material comes first.
 
-**Please note a deliberate change in default output.** `shelf_life()` now
-requires a threshold crossing to persist before reporting it as a forecast
-horizon, and no longer extrapolates a trend that is statistically
-indistinguishable from flat. Both changes correct results that were wrong
-rather than merely conservative, so a horizon computed with 1.2.x or 1.3.0
-should be recomputed rather than trusted. The previous behaviour remains
-reachable via `min_run = 1` and `projection_alpha = 1`. I have kept this as a
-patch release because it is a defect fix and the old behaviour is fully
-recoverable, but I am flagging the behaviour change explicitly rather than
-leaving a reviewer to discover it.
+**Please note a deliberate change in default output, in two functions.**
+`shelf_life()` now requires a threshold crossing to persist before reporting it
+as a forecast horizon, and no longer extrapolates a trend that is statistically
+indistinguishable from flat. `et_skill_score()` likewise now requires a run of
+non-skillful periods before declaring a null-relative forecast limit. All three
+changes correct results that were wrong rather than merely conservative, so any
+horizon or forecast limit computed with 1.2.x or 1.3.0 should be recomputed
+rather than trusted. The previous behaviour remains reachable via
+`min_run = 1` (both functions) and `projection_alpha = 1`. I have kept this as a
+patch release because these are defect fixes and the old behaviour is fully
+recoverable, but I am flagging the behaviour changes explicitly rather than
+leaving a reviewer to discover them.
 
-## 1.3.1 — two defects in `shelf_life()`
+## 1.3.1 — three defects in the horizon-reporting rules
 
-Both have the same shape: a noisy quantity promoted to a confident-looking
+All three have the same shape: a noisy quantity promoted to a confident-looking
 number.
 
 * **The first threshold exceedance was reported as the horizon.** When the
@@ -41,13 +43,27 @@ number.
   bound, which is the honest answer for a forecast whose precision does not
   degrade in-window.
 
-Every horizon now also carries exceedance diagnostics (`n_exceedances`,
-`frac_exceedance`, `first_exceedance`, `min_run`, and `slope`/`slope_p` in trend
-mode), so an isolated excursion is visible rather than silent.
+* **`et_skill_score()` had the same first-crossing defect.** Its null-relative
+  forecast limit was the first lead time with non-positive CRPS skill, with no
+  persistence requirement. Skill hovering near zero crosses by chance, so one
+  unlucky lead was reported as the limit — observed on a real comparison whose
+  mean skill across the window was +0.49 but whose reported limit fell at the
+  seventh lead. `et_skill_score()` now takes the same `min_run` (default 2), and
+  the returned `"forecast_limit"` attribute carries `n_below`, `first_below` and
+  `min_run` so isolated dips are visible rather than load-bearing. On the
+  package author's own case studies this moved five of ten reported limits while
+  leaving every mean skill unchanged, which is the expected signature of a
+  defect in the summary rule rather than in the score.
 
-New regression tests in `tests/testthat/test-shelf-life-sustained.R` pin the
-defect using the real trajectory that exposed it, and assert that `min_run = 1`
-and `projection_alpha = 1` reproduce the previous behaviour exactly.
+Every horizon and forecast limit now carries the diagnostics needed to see an
+isolated excursion for what it is: `shelf_life()` returns `n_exceedances`,
+`frac_exceedance`, `first_exceedance`, `min_run`, and `slope`/`slope_p` in trend
+mode; `et_skill_score()` returns `n_below`, `first_below` and `min_run`.
+
+New regression tests in `tests/testthat/test-shelf-life-sustained.R` and
+`tests/testthat/test-skill.R` pin both defects — the first using the real
+trajectory that exposed it — and assert that `min_run = 1` and
+`projection_alpha = 1` reproduce the previous behaviour exactly.
 
 ## 1.3.1 — new functionality
 

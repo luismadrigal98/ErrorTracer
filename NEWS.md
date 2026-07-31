@@ -36,6 +36,16 @@ whose CI-width / response-scale ratio degrades monotonically are unaffected.
   detectably now returns `lower_bound` instead of either a spurious observed
   horizon or a spurious projection.
 
+* **`et_skill_score()` had the same first-crossing defect in its forecast
+  limit.** The null-relative forecast limit was the first lead time with
+  `skill <= 0`, with no persistence requirement. Skill hovering near zero
+  crosses by chance, so one unlucky lead was promoted to "the horizon" — found
+  on a real comparison whose mean skill over the window was comfortably
+  positive. `et_skill_score()` now takes `min_run` (default `2`, matching
+  `shelf_life()`) and the returned `"forecast_limit"` attribute carries
+  `n_below`, `first_below` and `min_run`, so isolated dips are visible rather
+  than load-bearing. `min_run = 1` restores the previous behaviour.
+
 ## New features
 
 * **Group-level variance channel for hierarchical models.** The decomposition
