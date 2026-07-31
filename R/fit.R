@@ -24,14 +24,18 @@
 #' Two boundaries to keep in mind:
 #' \itemize{
 #'   \item \strong{Hierarchical / random-effects models} fit through the
-#'     formula (\code{y ~ x + (x | group)}), but the current decomposition does
-#'     \emph{not} yet split out a group-level variance component, and it does
-#'     not distinguish in-sample prediction (using group-specific parameters)
-#'     from out-of-sample prediction (integrating over the group level). Treat
-#'     the decomposition of hierarchical fits as provisional until a dedicated
-#'     group-variance term is added. The \code{grouping} argument here is a
-#'     \emph{separate} device: it fits one independent model per group (no
-#'     pooling), not a single multilevel model.
+#'     formula (\code{y ~ x + (x | group)}) and are decomposed correctly, with
+#'     the in-sample / out-of-sample distinction handled explicitly. Predicting
+#'     for a group the fit has \emph{seen} uses that group's estimated effect:
+#'     the effect is a parameter, its posterior uncertainty is part of
+#'     \code{param_var}, and there is no separate group channel (conditioning on
+#'     a known group \emph{reduces} predictive variance relative to the
+#'     population level). Predicting for a \emph{new} level integrates over the
+#'     group-level distribution and adds a \code{group_var} channel carrying the
+#'     between-group variance; \code{\link{et_predict}} detects new levels
+#'     automatically. The \code{grouping} argument here is a \emph{separate}
+#'     device: it fits one independent model per group (no pooling), not a
+#'     single multilevel model.
 #'   \item \strong{Convergence is your responsibility.} \code{et_fit()} emits a
 #'     warning on high Rhat or divergent transitions, but you should inspect
 #'     \code{\link{et_diagnose}} before predicting; the defaults

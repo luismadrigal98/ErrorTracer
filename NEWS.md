@@ -38,6 +38,46 @@ whose CI-width / response-scale ratio degrades monotonically are unaffected.
 
 ## New features
 
+* **Group-level variance channel for hierarchical models.** The decomposition
+  now handles `(1 | g)`-style fits correctly, and distinguishes the two budgets
+  that a hierarchical model implies:
+
+  - Predicting for a group the fit has **seen**: the group effect is an
+    estimated parameter, its posterior uncertainty is part of `param_var`, and
+    there is no separate channel. Conditioning on a known group *reduces*
+    predictive variance relative to the population level, so the naive
+    `Var(full) - Var(population)` is negative and would be meaningless as a
+    "group variance" (measured on a 6-group fixture: 0.022 vs 0.244).
+  - Predicting for a **new** level: the budget integrates over the group-level
+    distribution and a `group_var` column appears, carrying the between-group
+    variance. Verified to recover the fitted `tau^2` on a known-truth fixture.
+
+  `et_predict()` detects new levels automatically and reports which budget it is
+  computing. `param_var + group_var + env_var + residual_var (+ temporal_var)`
+  still equals `total_var` exactly.
+
+* **`et_shelf_life_pool()` — pool shelf lives across forecast origins.** A
+  horizon from a single forecast origin is a property of that training window as
+  much as of the system. This pools horizons from repeated origins and returns a
+  median with an interval. Origins where the forecast was still informative when
+  the data ran out are **right-censored**, not missing: discarding them biases
+  the pooled horizon downward, because the censored origins are exactly the ones
+  with long horizons. Estimation is Kaplan–Meier via `survival` (a Recommended
+  package, in `Suggests`), with a documented, deliberately interval-free
+  fallback when it is unavailable. All origins censored is reported as a result
+  — the forecast never became uninformative — not as an estimation failure.
+
+* **`et_priors_split()` — remove the prior/likelihood double use entirely.**
+  `shrinkage = "zero"` already stopped reusing point estimates as prior means,
+  but the prior *scale*, and any variable *selection* performed by the
+  first-stage model, still came from the rows that form the likelihood. This
+  fits the first stage on a random (optionally stratified) subset and returns
+  the disjoint complement for the Bayesian fit, so selection and likelihood
+  share no observations and no post-selection caveat applies. The cost —
+  a smaller likelihood sample — is documented rather than hidden. The
+  user-supplied seed is restored afterwards so it cannot leak into the caller's
+  RNG stream.
+
 * **Exceedance diagnostics on every horizon.** The `horizon` attribute now
   carries `n_exceedances`, `frac_exceedance`, `first_exceedance` and `min_run`
   alongside `value` and `type`, so an isolated excursion is visible rather than

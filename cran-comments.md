@@ -49,6 +49,32 @@ New regression tests in `tests/testthat/test-shelf-life-sustained.R` pin the
 defect using the real trajectory that exposed it, and assert that `min_run = 1`
 and `projection_alpha = 1` reproduce the previous behaviour exactly.
 
+## 1.3.1 — new functionality
+
+Two new exported functions, both closing gaps identified in peer review:
+
+* **`et_shelf_life_pool()`** pools forecast horizons across repeated forecast
+  origins. Origins where the forecast was still informative when the data ran
+  out are treated as right-censored rather than discarded — discarding them
+  biases the pooled horizon downward, since those are exactly the long horizons.
+  Estimation uses Kaplan–Meier via **survival** (a Recommended package, declared
+  in `Suggests`), with a documented fallback when it is unavailable.
+
+* **`et_priors_split()`** fits the first-stage regularized model on a subset and
+  returns the disjoint complement for the Bayesian fit, so variable selection
+  and the likelihood share no observations.
+
+* **Hierarchical models** are now decomposed correctly, distinguishing
+  prediction for a known group (the group effect is an estimated parameter; no
+  extra variance channel) from prediction for a new level (the budget integrates
+  over the group-level distribution and gains a `group_var` channel carrying the
+  between-group variance).
+
+The test suite grew from 475 to 557 tests, including numerical validation of the
+decomposition for Poisson, negative-binomial and Bernoulli families against
+independently simulated targets — previously only the Gaussian-identity case was
+verified numerically.
+
 ## 1.3.0 — variance decomposition under autocorrelation
 
 `decompose_uncertainty()` returned incorrect components for any model carrying a
@@ -97,19 +123,23 @@ resubmit; please tell me the preferred interval.
 * checking examples ... NOTE
 Examples with CPU (user + system) or elapsed time > 5s
                         user system elapsed
-decompose_uncertainty 46.682  2.472  49.290
-et_calibrate          43.743  2.238  46.214
-shelf_life            43.358  2.258  45.770
-et_fit                42.390  2.237  44.729
+decompose_uncertainty 52.230  2.827  55.159
+et_calibrate          48.642  2.480  51.241
+shelf_life            48.499  2.469  51.094
+et_priors_split       47.540  2.533  50.203
+et_fit                47.280  2.480  49.849
 ```
 
-These four examples each fit one Bayesian model, so almost all of that time is
+These five examples each fit one Bayesian model, so almost all of that time is
 Stan model **compilation** rather than computation. The examples are already
 minimal — 20 observations, one predictor, a single chain of 500 iterations, of
 which sampling accounts for under a second — so the cost is not reducible by
-shrinking them further. They are wrapped in `\donttest{}`. This note was present
-in the previously accepted 1.2.x releases and no example has been added or
-enlarged since.
+shrinking them further. They are wrapped in `\donttest{}`.
+
+This note was present in the previously accepted 1.2.x releases. To be precise
+about what changed: the list has grown from four entries to five, because this
+release adds `et_priors_split()`, whose example necessarily fits a model to show
+the split workflow. No pre-existing example has been enlarged.
 
 For context on total check time: the `testthat` suite is gated with
 `skip_on_cran()`, so it runs in about 4 seconds under CRAN's settings (507 tests
