@@ -213,14 +213,18 @@ head(decomp)
 
 | Component | Estimator |
 |---|---|
-| `param_var` | `Var[posterior_linpred]` across draws — coefficient uncertainty |
+| `param_var` | `Var[posterior_linpred]` across draws (population level when the model has group terms) — coefficient uncertainty |
+| `group_var` | `Var` contributed by the group-level distribution — present **only** when predicting for a *new* level of a random effect (see below) |
 | `env_var` | `Var[lp_perturbed] − Var[lp_unperturbed]` — additional variance from predictor noise |
 | `residual_var` | `E[σ²]` across posterior draws — biological process noise |
-| `total_var` | `Var[posterior_predict]` — full predictive variance |
+| `temporal_var` | autocorrelation-induced accumulation, present only for models carrying a correlation term |
+| `total_var` | **the sum of the components above** |
 
-All components are guaranteed non-negative. Using the posterior mean of σ² (not the median) ensures `param_var + residual_var ≈ total_var` by the law of total variance.
+`total_var` is *defined* as the component sum rather than read off `Var[posterior_predict]` separately, so the budget reconciles to 100% exactly and every channel is a genuine sub-share of a total that contains it. (Before 1.3.0 the total was computed independently and `env_var` sat outside it — a defect corrected in that release.)
 
-For models whose formula carries an autocorrelation term (`ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, `car()`), `decompose_uncertainty()` adds a fourth column `temporal_var`, defined as `pmax(0, total_var − (param_var + env_var + residual_var))`. It captures the autocorrelation-induced spread that `brms::posterior_predict()` accumulates iteratively beyond a single innovation, and `residual_var` is then to be read as the *innovation* variance rather than the stationary marginal variance. The four components reconstruct `total_var` modulo Monte Carlo error.
+**Autocorrelation.** For models whose formula carries `ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()` or `car()`, a `temporal_var` column appears. It captures the autocorrelation-induced spread that `brms::posterior_predict()` accumulates iteratively beyond a single innovation, and `residual_var` is then read as the *innovation* variance rather than the stationary marginal variance. The `pmax(., 0)` guard on this term is instrumented: it warns when the floored shortfall exceeds twice its Monte-Carlo standard error, rather than silently absorbing a systematic negative.
+
+**Hierarchical models.** Predicting for a group the fit has *seen* adds no channel — that group's effect is an estimated parameter and its uncertainty is already inside `param_var`. Predicting for a **new** level integrates over the group-level distribution and adds `group_var`, carrying the between-group variance. `et_predict()` detects new levels automatically and reports which budget it computed; the two are genuinely different objects and should not be compared directly.
 
 ---
 
@@ -235,10 +239,12 @@ For models whose formula carries an autocorrelation term (`ar()`, `ma()`, `arma(
 #   plausible_range = c(lower, upper)
 sl <- shelf_life(
   predictions              = pred,
-  plausible_range          = range(train_df$z_diff),
+  response_scale           = range(train_df$z_diff),  # defaults to the training range
   ci_level                 = 0.90,   # must be present in the et_prediction object
   threshold                = 1.0,    # CI/range ratio above which forecast is uninformative
   time_col                 = "year", # column in newdata to use as time axis
+  min_run                  = 2L,     # consecutive periods required before a crossing counts
+  projection_alpha         = 0.05,   # a projected horizon needs a significantly positive slope
   max_extrapolation_factor = 10      # cap on linear projection beyond observed window
 )
 
@@ -258,6 +264,13 @@ as.data.frame(sl)
 ```
 
 A `threshold` of 1.0 (default) means the forecast is considered uninformative when the CI spans the entire plausible response range. Lower thresholds (e.g., 0.8) impose stricter requirements.
+
+**Two gates guard against reporting noise as a horizon** (both added in 1.3.1, both changing the default output):
+
+- `min_run` (default `2`) requires the crossing to **persist**. A ratio hovering near the threshold without trending will exceed it once by chance, and the previous first-exceedance rule promoted that single excursion to a horizon — on a real 16-period series the reported horizon moved between four different answers under sampler settings alone.
+- `projection_alpha` (default `0.05`) requires a projected horizon to rest on a slope that is *significantly* positive. `min_slope_for_projection` is a magnitude gate only, so a flat, noisy trend could be extrapolated to a confident-looking crossing time whose interval spanned centuries.
+
+Every horizon carries `n_exceedances`, `frac_exceedance`, `first_exceedance` and `min_run` (plus `slope`/`slope_p` in projection mode) so an isolated excursion is visible rather than silent. Set `min_run = 1` and `projection_alpha = 1` to reproduce pre-1.3.1 behaviour. **Any horizon computed with an earlier release should be recomputed, not trusted.**
 
 ---
 
@@ -301,6 +314,78 @@ diag$loo$n_bad_pareto_k  # Pareto k > 0.7 indicate influential observations
 ```
 
 For grouped models, `et_diagnose()` returns a `per_group` list and a `summary` data.frame with one row per group.
+
+---
+
+## Forecast evaluation
+
+Shelf life is a statement about **precision** on the response scale. A forecast can be
+precise and still wrong, so the package pairs it with an accuracy criterion and a
+full-distribution calibration check.
+
+```r
+# Null-relative forecast limit (CRPS). Two nulls, hard in opposite regimes:
+#   "climatology"  (default) -- the unconditional TRAINING-response distribution:
+#                   what a forecaster with no covariates would have issued. Hard to
+#                   beat for a mean-reverting series. Needs no external data.
+#   "random_walk"            -- persistence: the last training value carried forward
+#                   with SD growing as sd(diff(train)) * sqrt(lead). Hard to beat for
+#                   a near-unit-root series.
+# Report BOTH: which null is demanding is a property of the series, not the model.
+sk_clim <- et_skill_score(pred, observed = valid_df, time_col = "year",
+                          null = "climatology")
+sk_rw   <- et_skill_score(pred, observed = valid_df, time_col = "year",
+                          null = "random_walk")
+attr(sk_clim, "forecast_limit")   # $value, $type, $n_below, $first_below, $min_run
+
+# Gate the shelf life on skill, so a precise-but-biased forecast cannot pass:
+sl_gated <- shelf_life(pred, response_scale = range(train_df$z_diff),
+                       ci_level = 0.90, skill = sk_clim)
+
+# Probability integral transform -- the continuous-response analogue of the rank
+# histogram. Uniform = calibrated; U-shape = over-confident; tilt = biased.
+pit <- et_pit(pred, observed = valid_df)
+et_plot_pit(pit)
+
+# Order-independent (Sobol) decomposition, as a cross-check on the additive budget's
+# ordering: reports first-order parameter and environmental shares plus their interaction.
+sob <- et_sobol(pred, seed = 1L)
+```
+
+`et_skill_score()` takes the same `min_run` as `shelf_life()` (default `2`) for the same
+reason: skill hovering near zero crosses by chance, and a bare first-crossing rule turns one
+unlucky lead into a forecast limit.
+
+## Pooling across forecast origins
+
+A horizon read off a **single** forecast origin inherits whatever was idiosyncratic about the
+final training years. `et_shelf_life_pool()` pools horizons from repeated origins, treating
+origins whose data ran out before the forecast degraded as **right-censored** rather than
+dropping them — dropping them biases the pooled horizon downward, because those are exactly
+the long horizons.
+
+```r
+# horizons: a data.frame with one row per forecast origin and columns
+#   lead     -- the horizon in lead time
+#   censored -- TRUE if the forecast was still informative when the data ran out
+#   group    -- optional; pools separately per group (e.g. per species)
+pooled <- et_shelf_life_pool(horizons, conf_level = 0.95)   # Kaplan-Meier via {survival}
+```
+
+## Avoiding the post-selection problem
+
+When the first-stage model is an elastic net, variable selection and the likelihood normally
+see the same rows, so reported coverage is conditional on the selected set being correct.
+`et_priors_split()` removes the issue by construction:
+
+```r
+sp <- et_priors_split(train_df, prior_fun = my_enet_fun, prop = 0.5, seed = 1L)
+fit <- et_fit(z_diff ~ Tmean + PPT + SWE, data = sp$fit_data, priors = sp$priors)
+```
+
+The cost is sample size: the likelihood sees fewer rows and the posterior is correspondingly
+wider. Split when selection stability is in doubt; don't when the predictor set is fixed a
+priori and there is no selection to protect against.
 
 ---
 
@@ -385,7 +470,7 @@ decomp <- decompose_uncertainty(pred)
 # responses supply explicit bounds.
 sl <- shelf_life(
   pred,
-  plausible_range          = range(train_df$z_diff),
+  response_scale           = range(train_df$z_diff),
   ci_level                 = 0.90,
   threshold                = 1.0,
   time_col                 = "year",
@@ -519,7 +604,7 @@ ErrorTracer/
 
 - **Small-n regime:** When `n < 10` observations, informed priors from `extract_priors()` dominate the posterior. This is the setting where the enet→prior pipeline provides the most value, but is also most sensitive to prior misspecification. Document prior choices carefully.
 - **Intercept handling:** The glmnet intercept is excluded from the prior by default, as it reflects upstream centering of training data. If your data is not pre-centered, verify that the intercept prior (default `Normal(0, 2.5)`) is appropriate.
-- **Environmental uncertainty is additive:** `env_var` is estimated via perturbation and is reported separately from `total_var`, which is computed from the full posterior predictive (parameter + residual only). Interpret the decomposition table accordingly.
+- **Environmental uncertainty is inside the total:** `env_var` is estimated by perturbation and is a component *of* `total_var`, which is defined as the sum of the channels. Releases before 1.3.0 reported it outside the total; decomposition tables produced by those versions should be recomputed rather than compared.
 - **`ranger` priors are undirected:** Because random forests provide no signed coefficients, ranger-derived priors are centered at zero. This is conservative but avoids false directional assumptions.
 
 ---
@@ -527,6 +612,20 @@ ErrorTracer/
 ## License
 
 MIT License. See `LICENSE` for details.
+
+---
+
+## Use of AI assistance
+
+Parts of this package were developed with the assistance of Anthropic's **Claude Opus**, used
+as a coding and review tool. Its contributions include unit and regression tests, package and
+function documentation, implementation work on several functions, and code audits that
+identified and corrected defects in the variance decomposition and in the horizon-reporting
+rules.
+
+All AI-assisted output was specified, supervised, reviewed and accepted by the author, who
+takes full responsibility for the correctness of the package. No AI system is an author or a
+contributor to this software.
 
 ---
 
