@@ -86,7 +86,7 @@ Two new exported functions, both closing gaps identified in peer review:
   over the group-level distribution and gains a `group_var` channel carrying the
   between-group variance).
 
-The test suite grew from 475 to 557 tests, including numerical validation of the
+The test suite grew from 475 to 572 tests, including numerical validation of the
 decomposition for Poisson, negative-binomial and Bernoulli families against
 independently simulated targets — previously only the Gaussian-identity case was
 verified numerically.
@@ -158,7 +158,7 @@ release adds `et_priors_split()`, whose example necessarily fits a model to show
 the split workflow. No pre-existing example has been enlarged.
 
 For context on total check time: the `testthat` suite is gated with
-`skip_on_cran()`, so it runs in about 4 seconds under CRAN's settings (507 tests
+`skip_on_cran()`, so it runs in about 4 seconds under CRAN's settings (572 tests
 locally with `NOT_CRAN=true`). Vignettes do not fit models at build time.
 
 ## Reverse dependencies
