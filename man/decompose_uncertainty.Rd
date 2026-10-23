@@ -15,8 +15,9 @@ decompose_uncertainty(predictions, ...)
 \value{
 A \code{data.frame} with columns
   \code{obs_id, param_var, env_var, residual_var, total_var}
-  (plus \code{temporal_var} for autocorrelation models, and a leading
-  \code{group} column for grouped predictions).
+  (plus \code{temporal_var} for autocorrelation models or
+  \code{closure_gap} for iid ones, and a leading \code{group} column for
+  grouped predictions).
 }
 \description{
 Returns a \code{data.frame} with the uncertainty decomposition stored
@@ -33,30 +34,48 @@ inside an \code{et_prediction} object:
     drivers, and drift. For autocorrelation models this is the
     \emph{innovation} variance, not the stationary marginal variance;
     the autocorrelated accumulation is reported separately in
-    \code{temporal_var}.}
+    \code{temporal_var}.  For a non-identity link it is evaluated at the
+    \emph{perturbed} mean, \eqn{E_s[V(\mu^{\mathrm{env}})]}, because that is
+    the mean the predictive draws are generated at; it therefore depends on
+    \code{env_noise} through the variance function.  For Gaussian,
+    \eqn{V(\mu) = \sigma^2} is independent of the mean and the distinction
+    does not arise.}
   \item{temporal_var}{(Only present when the model formula contains an
     autocorrelation term such as \code{ar()}, \code{ma()},
     \code{arma()}, \code{cosy()}, \code{unstr()}, \code{sar()}, or
-    \code{car()}.) Variance attributable to residual temporal or
-    spatial dependence beyond the iid \code{param + residual} sum,
-    computed as the excess of the sampled posterior-predictive variance
-    over \code{param_var + residual_var}, i.e.
-    \code{pmax(0, var(posterior_predict) - (param_var + residual_var))}.
-    This captures the AR/MA/ARMA innovation accumulation that the analytic
-    single-innovation \code{residual_var} does not.}
-  \item{total_var}{Total predictive variance, \emph{defined as the sum of
-    its components} so the budget reconciles exactly (law of total
-    variance): \code{param_var + env_var + residual_var} for iid models,
-    plus \code{temporal_var} for autocorrelation models. \code{env_var}
-    thus enters \code{total_var} through the perturbed predictors, rather
-    than being added on top of an env-free total.}
+    \code{car()}.) Variance attributable to residual temporal or spatial
+    dependence beyond the named channels, computed as the signed remainder
+    \code{total_var - (param_var + env_var + residual_var)}.  This captures
+    the AR/MA/ARMA innovation accumulation that a single-innovation
+    \code{residual_var} cannot represent.  It is \strong{signed}: a
+    negative value means autocorrelated errors \emph{reduce} predictive
+    variance relative to the independent-innovation baseline, which is a
+    real possibility for a covariance term.  Being a remainder, it also
+    absorbs Monte Carlo error from the other channels, so read a
+    \code{temporal_var} of the same order as \code{v_env_mcse} as noise.}
+  \item{closure_gap}{(Only present for iid models.)
+    \code{total_var - (param_var + env_var + residual_var)}: how far the
+    named channels fall short of the measured posterior predictive variance.
+    It is Monte Carlo error for a correctly specified iid model, of the order
+    of \code{v_env_mcse}.  A systematically large value means a channel is
+    mis-estimated.}
+  \item{total_var}{Total predictive variance: the \strong{sampled variance
+    of the environmentally inclusive posterior predictive draws}, which is
+    the distribution the reported credible interval is drawn from.  The
+    driver perturbation is applied \emph{before} the predictive draw, so
+    \code{env_var} is a genuine share of this total.}
 }
 }
 \details{
-All variance components are guaranteed non-negative, and because
-\code{total_var} is the sum of the other components the reported
-percentage shares sum to 100\% exactly (\code{param_var + env_var +
-residual_var (+ temporal_var) == total_var}).
+Changed in 1.4.0.  \code{total_var} used to be \emph{defined} as the sum of
+the other components, which made the shares reconcile to 100\% by
+construction and made \code{env_var} an add-on to a predictive variance that
+did not contain it.  It is now measured, and the sum is recovered as a
+\emph{result}: the channels add up to \code{total_var} exactly for
+autocorrelation models (where \code{temporal_var} is the remainder) and up to
+Monte Carlo error for iid models (reported as \code{closure_gap}).
+\code{param_var}, \code{env_var} and \code{residual_var} remain
+non-negative; \code{temporal_var} and \code{closure_gap} are signed.
 }
 \examples{
 \donttest{

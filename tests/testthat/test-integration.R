@@ -87,7 +87,16 @@ test_that("et_predict returns an et_prediction with correct dimensions", {
   )
   expect_s3_class(pred, "et_prediction")
   expect_equal(ncol(pred$posterior_predict), 5L)
-  expect_equal(nrow(pred$posterior_predict), 200L)
+  # n_perturb (50) below n_draws (200) WITH env_noise: since 1.4.0 the whole
+  # object is restricted to the 50 draws that carry a perturbation, rather than
+  # recycling the perturbation across all 200. Every array therefore describes
+  # one draw set, which is what makes total_var, the interval, PIT, calibration
+  # and shelf life mutually consistent.
+  expect_equal(nrow(pred$posterior_predict), 50L)
+  expect_equal(nrow(pred$predictive_draws), 50L)
+  expect_equal(nrow(pred$posterior_linpred), 50L)
+  expect_equal(nrow(pred$lp_perturbed), 50L)
+  expect_equal(pred$n_draws, 50L)
   expect_true(all(c("row_id", "ci_level", "lower", "upper", "width") %in%
                     colnames(pred$credible_intervals)))
 })
@@ -217,9 +226,8 @@ test_that("env_ensemble makes driver variance grow with lead time", {
   w95 <- pr$credible_intervals
   w95 <- w95$width[w95$ci_level == 0.95]
   expect_gt(w95[H], w95[1])
-  # Budget reconciles; ensemble metadata is recorded
-  recon <- d$param_var + d$env_var + d$residual_var
-  expect_equal(recon, d$total_var, tolerance = 1e-8)
+  # Budget closes on the measured total; ensemble metadata is recorded
+  expect_budget_closes(d, pred = pr)
   expect_equal(pr$env_ensemble$n_scenarios, M)
 })
 

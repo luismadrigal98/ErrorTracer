@@ -43,10 +43,8 @@ test_that("a known group yields NO group channel (in-sample budget)", {
   # No group_var column: for a known group the effect is a parameter, and its
   # posterior uncertainty is already inside param_var.
   expect_false("group_var" %in% colnames(dec))
-  # Budget still reconciles exactly.
-  expect_equal(dec$total_var,
-               dec$param_var + dec$env_var + dec$residual_var,
-               tolerance = 1e-8)
+  # Budget closes on the measured total (see expect_budget_closes in helper.R).
+  expect_budget_closes(dec, pred = pred)
 })
 
 test_that("a new group adds a group channel recovering tau^2", {
@@ -67,10 +65,8 @@ test_that("a new group adds a group channel recovering tau^2", {
   tau_hat <- mean(dm[, "sd_g__Intercept"])
   expect_equal(mean(dec$group_var), tau_hat^2, tolerance = 0.5)
 
-  # Budget reconciles exactly WITH the new channel included.
-  expect_equal(dec$total_var,
-               dec$param_var + dec$group_var + dec$env_var + dec$residual_var,
-               tolerance = 1e-8)
+  # Budget closes WITH the new channel included.
+  expect_budget_closes(dec, pred = pred)
 })
 
 test_that("out-of-sample prediction is wider than in-sample, as it must be", {
@@ -101,7 +97,5 @@ test_that("a model without group terms is completely unaffected", {
   dec <- decompose_uncertainty(et_predict(fit, newdata = nd, n_draws = 600,
                                           n_perturb = 300))
   expect_false("group_var" %in% colnames(dec))
-  expect_equal(dec$total_var,
-               dec$param_var + dec$env_var + dec$residual_var,
-               tolerance = 1e-8)
+  expect_budget_closes(dec, n_eff = 600L)
 })

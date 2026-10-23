@@ -13,20 +13,44 @@
 #'
 #' @param decomp A \code{data.frame} from \code{\link{decompose_uncertainty}}
 #'   or directly the \code{$decomposition} slot of an \code{et_prediction}.
-#' @param proportional Logical.  If \code{TRUE} (default), bars are scaled to
-#'   sum to 1 (proportional contribution).  If \code{FALSE}, raw variances
-#'   are shown.
+#' @param proportional Logical.  If \code{TRUE} (default), each component is
+#'   shown as a share of \code{total_var} (the measured predictive variance).
+#'   Shares therefore sum to 1 exactly for autocorrelation models and to within
+#'   Monte Carlo error for iid ones, where the shortfall is the
+#'   \code{closure_gap} column.  If \code{FALSE}, raw variances are shown.
+#'   Because \code{temporal_var} is signed, a negative component is drawn below
+#'   the zero line rather than silently clamped.
 #' @param group_col Character.  Optional name of a grouping column in
 #'   \code{decomp} (present for grouped predictions).
 #' @return A \code{ggplot2} object.
 #' @export
 et_plot_decomposition <- function(decomp, proportional = TRUE,
                                    group_col = NULL) {
-  components <- c("param_var", "env_var", "residual_var")
-  if ("temporal_var" %in% colnames(decomp)) {
-    components <- c(components, "temporal_var")
+  components <- c("param_var",
+                  if ("group_var" %in% colnames(decomp)) "group_var",
+                  "env_var", "residual_var",
+                  if ("temporal_var" %in% colnames(decomp)) "temporal_var")
+
+  # Normalise against the MEASURED total rather than against the component sum.
+  # position = "fill" would divide by the sum of the plotted components, which
+  # (a) hides the iid closure gap by rescaling it away and (b) is meaningless
+  # once a component can be negative. Dividing by total_var keeps the y axis
+  # interpretable as "share of predictive variance" in every case.
+  if (proportional && "total_var" %in% colnames(decomp)) {
+    denom <- decomp[["total_var"]]
+    denom[!is.finite(denom) | denom <= 0] <- NA_real_
+    for (cc in components) decomp[[cc]] <- decomp[[cc]] / denom
   }
+
   long <- .pivot_decomp(decomp, components)
+
+  has_negative <- any(long[["value"]] < 0, na.rm = TRUE)
+  if (has_negative) {
+    .et_info("A variance component is negative (temporal_var is a signed ",
+             "covariance term); it is drawn below the zero line. A negative ",
+             "temporal_var of the same order as v_env_mcse is Monte Carlo ",
+             "noise rather than a real reduction in predictive variance.")
+  }
 
   x_col <- if (!is.null(group_col) && group_col %in% colnames(decomp)) {
     group_col
@@ -38,7 +62,8 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
     "Parameter"     = "#2166AC",
     "Environmental" = "#4DAC26",
     "Residual"      = "#D1E5F0",
-    "Temporal"      = "#B2182B"
+    "Temporal"      = "#B2182B",
+    "Group"         = "#762A83"
   )
 
   p <- ggplot2::ggplot(long, ggplot2::aes(
@@ -46,17 +71,21 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
     y    = .data[["value"]],
     fill = .data[["component"]]
   )) +
-    ggplot2::geom_col(
-      position = if (proportional) "fill" else "stack"
-    ) +
+    ggplot2::geom_col(position = "stack") +
     ggplot2::scale_fill_manual(values = fill_values, name = "Component") +
     ggplot2::labs(
       title = "Uncertainty Decomposition",
       x     = if (x_col == "obs_id") "Observation" else x_col,
-      y     = if (proportional) "Proportion of variance" else "Variance"
+      y     = if (proportional) "Share of predictive variance" else "Variance"
     ) +
     et_theme() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+
+  # Make the zero line visible whenever a signed component can cross it.
+  if (has_negative) {
+    p <- p + ggplot2::geom_hline(yintercept = 0, linewidth = 0.3,
+                                 colour = "grey20")
+  }
 
   p
 }
@@ -571,6 +600,7 @@ scales_percent_safe <- function(x) {
       env_var      = "Environmental",
       residual_var = "Residual",
       temporal_var = "Temporal",
+      group_var    = "Group",
       col
     )
     df <- decomp[, c(setdiff(colnames(decomp), cols), col), drop = FALSE]

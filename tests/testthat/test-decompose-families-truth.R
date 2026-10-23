@@ -21,11 +21,12 @@ brute_total <- function(pred) {
   apply(pred$posterior_predict, 2, stats::var)
 }
 
-expect_budget_reconciles <- function(dec) {
-  comp <- dec$param_var + dec$env_var + dec$residual_var
-  if ("group_var" %in% colnames(dec))    comp <- comp + dec$group_var
-  if ("temporal_var" %in% colnames(dec)) comp <- comp + dec$temporal_var
-  expect_equal(dec$total_var, comp, tolerance = 1e-8)
+# Kept as a thin alias so the per-family tests below read unchanged; the real
+# check lives in expect_budget_closes() (tests/testthat/helper.R), which bounds
+# the closure gap by its Monte Carlo scale now that total_var is measured rather
+# than defined as the component sum.
+expect_budget_reconciles <- function(dec, pred = NULL) {
+  expect_budget_closes(dec, pred = pred, n_eff = 400L)
 }
 
 # The analytic total (param + residual, no env noise) should agree with the
@@ -120,4 +121,88 @@ test_that("env perturbation is recovered on the response scale under a log link"
   target <- (exp(eta) * beta * delta)^2
   rel    <- abs(dec$env_var - target) / target
   expect_lt(stats::median(rel), 0.5)
+})
+
+# ── 1.4.0: family-correct predictive draws and the binomial trials factor ──
+# These exercise the real fitted paths that the pure-function tests in
+# test-family-predictive.R cover analytically.
+
+test_that("Gaussian identity still uses the exact location shift", {
+  # The shift mu_env + (y_pp - mu) IS a draw from N(mu_env, sigma^2), so the
+  # Gaussian path must be untouched by the family-RNG route. This guards the
+  # case-study numbers: every analysis in the paper is Gaussian identity.
+  set.seed(21)
+  d <- data.frame(x = rnorm(60)); d$y <- rnorm(60, 1 + 0.8 * d$x, 0.5)
+  fit <- et_fit(y ~ x, data = d, chains = 2, iter = 1000, warmup = 500,
+                cores = 2, refresh = 0, seed = 1, silent = 2)
+  nd <- data.frame(x = seq(-1.5, 1.5, length.out = 6))
+  set.seed(3)
+  p <- et_predict(fit, newdata = nd, env_noise = list(x = 0.4), n_draws = 600)
+
+  expect_equal(
+    p$predictive_draws,
+    p$lp_perturbed + (p$posterior_predict - p$posterior_linpred)
+  )
+  expect_budget_closes(p$decomposition, pred = p)
+})
+
+test_that("Poisson predictive draws are counts and the budget closes", {
+  set.seed(22)
+  d <- data.frame(x = rnorm(150)); d$y <- rpois(150, exp(1.0 + 0.8 * d$x))
+  fit <- et_fit(y ~ x, data = d, family = poisson(), chains = 2, iter = 1500,
+                warmup = 750, cores = 2, refresh = 0, seed = 1, silent = 2)
+  nd <- data.frame(x = seq(-1.5, 1.5, length.out = 8))
+
+  set.seed(4)
+  p <- et_predict(fit, newdata = nd, env_noise = list(x = 0.5), n_draws = 1500)
+  dr <- p$predictive_draws
+
+  # Pre-1.4.0 the location shift made 100% of these non-integer and 6-8%
+  # negative, because it moved a Poisson(mu) residual onto mu_env.
+  expect_true(all(dr >= 0))
+  expect_true(all(dr == round(dr)))
+  expect_budget_closes(p$decomposition, pred = p)
+
+  # residual_var is E[V(mu_env)], so it must exceed the unperturbed E[V(mu)]
+  # under a log link (the Jensen term the shift used to drop).
+  set.seed(4)
+  p0 <- et_predict(fit, newdata = nd, n_draws = 1500)
+  expect_gt(mean(p$decomposition$residual_var),
+            mean(p0$decomposition$residual_var))
+})
+
+test_that("binomial with trials > 1 decomposes on the count scale", {
+  set.seed(23)
+  d <- data.frame(x = rnorm(150))
+  d$y <- rbinom(150, size = 10L, prob = plogis(0.3 + 1.0 * d$x))
+  d$n <- 10L
+  fit <- et_fit(y | trials(n) ~ x, data = d, family = binomial(), chains = 2,
+                iter = 1500, warmup = 750, cores = 2, refresh = 0, seed = 1,
+                silent = 2)
+  nd <- data.frame(x = seq(-1.5, 1.5, length.out = 8), n = 10L)
+
+  set.seed(5)
+  p   <- et_predict(fit, newdata = nd, env_noise = list(x = 0.5), n_draws = 1500)
+  dec <- p$decomposition
+  dr  <- p$predictive_draws
+
+  # Draws stay inside the support (they used to run -0.180 to 10.222).
+  expect_true(all(dr >= 0 & dr <= 10))
+  expect_true(all(dr == round(dr)))
+
+  # residual_var must be n p (1 - p), not p (1 - p): with p in 0.17-0.90 and
+  # n = 10 the correct values are O(1-2.5), the old ones O(0.17-0.25).
+  expect_gt(mean(dec$residual_var), 1)
+
+  # The whole budget sits on the count scale, so it closes against the measured
+  # predictive variance. Pre-1.4.0 closure_gap here was ~90% of total_var.
+  expect_budget_closes(dec, pred = p)
+
+  # And driver uncertainty actually propagates: the shift left the predictive
+  # variance flat in the perturbation SD.
+  set.seed(5)
+  p_small <- et_predict(fit, newdata = nd, env_noise = list(x = 0.1),
+                        n_draws = 1500)
+  expect_gt(mean(dec$total_var), 1.15 * mean(p_small$decomposition$total_var))
+  expect_gt(mean(dec$env_var / dec$total_var), 0.10)
 })

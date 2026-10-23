@@ -17,8 +17,16 @@
   disp_draws   <- list(sigma = sigma_draws, phi = NULL,
                        shape = NULL, nu = NULL)
 
+  # Env-inclusive predictive draws, built exactly as et_predict() builds them
+  # (matched draw-for-draw). total_var is the variance of THESE draws, so the
+  # mock has to supply them: passing only the unperturbed pp would report an
+  # env_var that is not in the total, which is the inconsistency the 1.4.0
+  # restructure exists to expose.
+  pp_env <- ErrorTracer:::.inflate_env_predictive(lp_p, pp, lp)
+
   decomp <- ErrorTracer:::.decompose_from_arrays(
     pp           = pp,
+    pp_env       = pp_env,
     mu_draws     = lp,       # Gaussian: mu_draws == lp
     mu_perturbed = lp_p,
     mu_draws_sub = lp,       # n_perturb == n_draws in mock
@@ -121,19 +129,25 @@ test_that("temporal_var captures the autocor gap when has_autocor = TRUE", {
   disp_draws   <- list(sigma = sigma_draws, phi = NULL,
                        shape = NULL, nu = NULL)
 
+  pp_env <- ErrorTracer:::.inflate_env_predictive(lp_p, pp, lp)
+
   d_iid <- ErrorTracer:::.decompose_from_arrays(
-    pp = pp, mu_draws = lp, mu_perturbed = lp_p, mu_draws_sub = lp,
+    pp = pp, pp_env = pp_env, mu_draws = lp, mu_perturbed = lp_p,
+    mu_draws_sub = lp,
     family = gauss_family, disp_draws = disp_draws, has_autocor = FALSE)
   d_ar <- ErrorTracer:::.decompose_from_arrays(
-    pp = pp, mu_draws = lp, mu_perturbed = lp_p, mu_draws_sub = lp,
+    pp = pp, pp_env = pp_env, mu_draws = lp, mu_perturbed = lp_p,
+    mu_draws_sub = lp,
     family = gauss_family, disp_draws = disp_draws, has_autocor = TRUE)
 
   expect_false("temporal_var" %in% colnames(d_iid))
   expect_true("temporal_var" %in% colnames(d_ar))
+  # temporal_var is signed since 1.4.0; this fixture has a genuine accumulation
+  # (pp carries more spread than one innovation), so here it is positive.
   expect_true(all(d_ar$temporal_var >= 0))
-  # total_var is DEFINED as the sum of every component, so param + env +
-  # residual + temporal reconstructs total_var EXACTLY (env now enters the
-  # total instead of being bolted on top).
+  # total_var is the MEASURED variance of the env-inclusive predictive draws,
+  # and temporal_var is the remainder, so the channels close on it exactly.
+  expect_equal(d_ar$total_var, apply(pp_env, 2, stats::var))
   recon <- d_ar$param_var + d_ar$env_var + d_ar$residual_var + d_ar$temporal_var
   expect_equal(recon, d_ar$total_var, tolerance = 1e-10)
   # And the temporal gap should be substantial relative to residual_var alone.
@@ -219,8 +233,10 @@ test_that("var_trim is applied to every channel, not just the predictive varianc
   expect_lt(mean(d_trim$param_var), mean(d_raw$param_var))
 })
 
-test_that("iid budget reconciles exactly: param + env + residual == total", {
-  # T1: total_var must CONTAIN env_var so the percentage shares sum to 100%.
+test_that("iid budget closes on the measured total within Monte Carlo error", {
+  # total_var must CONTAIN env_var, so the shares account for ~100%. Since
+  # 1.4.0 the total is measured rather than defined, so the closure is a
+  # RESULT, checked here against its own Monte Carlo error.
   set.seed(202)
   n_obs <- 8; n_draws <- 400
   lp   <- matrix(rnorm(n_draws * n_obs, mean = 0.5, sd = 0.25), nrow = n_draws)
@@ -234,17 +250,28 @@ test_that("iid budget reconciles exactly: param + env + residual == total", {
                        linkinv = identity)
   disp_draws   <- list(sigma = sigma_draws, phi = NULL, shape = NULL, nu = NULL)
 
+  pp_env <- ErrorTracer:::.inflate_env_predictive(lp_p, pp, lp)
+
   d <- ErrorTracer:::.decompose_from_arrays(
-    pp = pp, mu_draws = lp, mu_perturbed = lp_p, mu_draws_sub = lp,
+    pp = pp, pp_env = pp_env, mu_draws = lp, mu_perturbed = lp_p,
+    mu_draws_sub = lp,
     family = gauss_family, disp_draws = disp_draws, has_autocor = FALSE)
 
   # env_var is genuinely non-zero here
   expect_true(mean(d$env_var) > 0)
-  # Exact reconciliation → percentage shares sum to 100%
+  # total_var is the measured predictive variance, not a sum.
+  expect_equal(d$total_var, apply(pp_env, 2, stats::var))
+  # The named channels account for it up to Monte Carlo error, reported as
+  # closure_gap. The bound is deliberately loose: at n_draws = 400 the env
+  # subtraction estimator alone carries sqrt(2 / 400) ~ 7%, before the error in
+  # param_var and in Var(pp_env). What this guards against is a STRUCTURAL gap,
+  # e.g. a total that does not contain env_var at all (which would show up here
+  # as a closure gap of about -env_var / total, roughly -28% for this fixture).
   recon <- d$param_var + d$env_var + d$residual_var
-  expect_equal(recon, d$total_var, tolerance = 1e-10)
+  expect_equal(d$closure_gap, d$total_var - recon)
+  expect_lt(max(abs(d$closure_gap) / d$total_var), 0.15)
   pct <- 100 * recon / d$total_var
-  expect_equal(pct, rep(100, n_obs), tolerance = 1e-8)
+  expect_equal(pct, rep(100, n_obs), tolerance = 15)
 })
 
 test_that(".formula_has_autocor detects ar()/ma()/arma() and rejects plain formulas", {

@@ -175,3 +175,15 @@ test_that("horizon attribute has required fields", {
   hor  <- attr(sl, "horizon")
   expect_true(all(c("type", "value", "last_informative", "description") %in% names(hor)))
 })
+
+test_that("shelf_life() rejects a time_col that is a column rather than a name", {
+  pred <- .mock_pred_for_sl()
+  expect_error(
+    shelf_life(pred, response_scale = c(0, 1), time_col = c(2001, 2002, 2003)),
+    regexp = "single column name"
+  )
+  expect_error(
+    shelf_life(pred, response_scale = c(0, 1), time_col = 2001),
+    regexp = "single column name"
+  )
+})

@@ -125,8 +125,18 @@
 #' @param ci_levels Numeric vector.  Credible interval levels to compute
 #'   (default \code{c(0.5, 0.8, 0.9, 0.95)}).
 #' @param n_perturb Integer.  Number of posterior draws used for the
-#'   environmental perturbation step (default \code{min(500, n_draws)}).
-#'   Reducing this speeds up computation.
+#'   environmental perturbation step (default \code{n_draws}, i.e.\ every draw).
+#'   Reducing it speeds up the perturbation at the cost of a smaller sample for
+#'   \emph{the whole env-inclusive budget}: the perturbed mean of draw \eqn{s}
+#'   must be paired with the residual of that same draw \eqn{s}, so when
+#'   \code{n_perturb < n_draws} and environmental uncertainty is present, the
+#'   predictive draws and every decomposition channel are computed on the first
+#'   \code{n_perturb} draws rather than recycling the perturbation across all
+#'   of them.  Recycling would destroy
+#'   \eqn{\mathrm{Cov}(\mu^{(s)}, y^{pp,(s)} - \mu^{(s)})}, which is
+#'   substantially negative for an \code{ar()} fit and inflates the predictive
+#'   variance (measured at up to 196x \code{env_var} on a near-unit-root
+#'   series).  Leave at the default unless the perturbation is the bottleneck.
 #' @param n_env_draws Integer.  Number of independent environmental
 #'   perturbations averaged \emph{per posterior draw} when estimating
 #'   \code{env_var} (default \code{1}).  Increasing this reduces Monte Carlo
@@ -155,15 +165,24 @@
 #'   environmental (predictor) uncertainty is folded into the credible
 #'   interval when \code{interval_type = "predictive"}.  When \code{TRUE},
 #'   intervals are built from \strong{environmentally inflated} draws in which
-#'   each posterior-predictive residual is re-centred on the env-perturbed
-#'   response-scale mean, \eqn{\tilde y = \tilde\mu + (y^{pp} - \mu)}
-#'   (family-general; for Gaussian identity this equals
-#'   \eqn{\tilde{\mathrm{lp}} + \varepsilon}, \eqn{\varepsilon\sim N(0,\sigma^2)}).
-#'   The interval variance is then param + env + residual, coherent with the
-#'   env-inclusive \code{total_var}.  The default \code{NULL} means
-#'   \strong{auto}: env is folded in whenever the caller supplied non-zero
-#'   \code{env_noise}, and omitted otherwise.  Pass \code{FALSE} to force a
-#'   parameter + residual interval even when \code{env_noise} is given.
+#'   the draws are generated at the env-perturbed mean.  For a Gaussian identity
+#'   link that is the location shift
+#'   \eqn{\tilde y = \tilde\mu + (y^{pp} - \mu)}, which is exactly a draw from
+#'   \eqn{N(\tilde\mu, \sigma^2)} carrying that draw's own residual.  For any
+#'   other family the draw is taken from the response distribution \emph{at}
+#'   \eqn{\tilde\mu}, since the shift would keep the dispersion at \eqn{\mu}
+#'   while moving only the location (for a count model it also produced
+#'   non-integer and negative draws).  Models with a residual autocorrelation
+#'   term keep the shift whatever the family, because \eqn{y^{pp} - \mu} is what
+#'   carries the \code{brms} forward iteration; such a fit reports a
+#'   first-order approximation and says so.
+#'   The interval variance is then param + env + residual, coherent with
+#'   \code{total_var}.  The default \code{NULL} means \strong{auto}: env is
+#'   folded in whenever the caller supplied non-zero \code{env_noise}, and
+#'   omitted otherwise.  Pass \code{FALSE} to force a parameter + residual
+#'   interval even when \code{env_noise} is given --- note that this makes the
+#'   reported interval deliberately narrower than \code{total_var} implies,
+#'   since \code{total_var} is always the variance of the env-inclusive draws.
 #' @param var_trim Numeric in \eqn{[0, 0.5)}, default \code{0}.  Winsorization
 #'   applied when computing \emph{every} variance channel of the decomposition:
 #'   each column of draws is clipped to its
@@ -196,8 +215,13 @@
 #'   \item{\code{credible_intervals}}{data.frame with columns
 #'     \code{row_id, ci_level, lower, median, upper, width}.}
 #'   \item{\code{decomposition}}{data.frame with columns
-#'     \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var}.
+#'     \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var},
+#'     plus \code{temporal_var} for autocorrelation models or
+#'     \code{closure_gap} for iid ones.
 #'     All components are on the \strong{response scale}.
+#'     \code{total_var} is the \strong{measured} variance of the env-inclusive
+#'     predictive draws, not the sum of the channels; see
+#'     \code{\link{decompose_uncertainty}}.
 #'     \code{v_env_mcse} is the Monte Carlo SE of \code{env_var}.
 #'     \code{residual_var} is per-observation for non-Gaussian families
 #'     (e.g.\ Binomial: \eqn{E_s[\mu^{(s)}(1-\mu^{(s)})]}) and constant
@@ -249,7 +273,10 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   n_env_draws   <- max(1L, as.integer(n_env_draws))
   fit           <- model$fit
   pred_names    <- .brms_pred_names(fit)
-  n_perturb     <- if (is.null(n_perturb)) min(500L, n_draws) else as.integer(n_perturb)
+  # Default to every draw: the env-perturbed mean of draw s must meet the
+  # residual of draw s (see .inflate_env_predictive), so a perturbation
+  # subsample shrinks the whole env-inclusive budget rather than being free.
+  n_perturb     <- if (is.null(n_perturb)) n_draws else as.integer(n_perturb)
 
   # For EIV-fit models, posterior_predict() on newdata requires each se_<pred>
   # column present. Copy them over from the training data (recycled to the
@@ -388,22 +415,32 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # For Gaussian identity g^{-1}(eta) = eta, so mu_draws == lp — reuse it.
   # For all other families, apply the inverse link to get the response scale.
   # incl_autocor = FALSE for the same reason as above.
+  # Binomial trials factor: posterior_linpred(transform = TRUE) gives the
+  # probability p, but posterior_predict gives a count in 0..n, so every
+  # response-scale mean is scaled to n p to put the whole budget on the same
+  # scale as the predictive draws. NULL for every other family.
+  trials <- .binomial_trials(fit, newdata, nrow(newdata))
+
   mu_draws <- if (is_gauss_id) {
     lp
   } else {
-    do.call(brms::posterior_linpred,
-            c(list(fit, newdata = newdata, draw_ids = draw_ids,
-                   transform = TRUE, incl_autocor = FALSE), nl_args))
+    .apply_trials(
+      do.call(brms::posterior_linpred,
+              c(list(fit, newdata = newdata, draw_ids = draw_ids,
+                     transform = TRUE, incl_autocor = FALSE), nl_args)),
+      trials)
   }
 
   # --- 3b. Group-level (hierarchical) channel ---
   # See the block above .et_new_level_args() for why this is only computed for
   # groups the fit has not seen.
   mu_pop_draws <- if (new_levels) {
-    do.call(brms::posterior_linpred, c(
-      list(fit, newdata = newdata, draw_ids = draw_ids,
-           transform = !is_gauss_id, incl_autocor = FALSE, re_formula = NA)
-    ))
+    .apply_trials(
+      do.call(brms::posterior_linpred, c(
+        list(fit, newdata = newdata, draw_ids = draw_ids,
+             transform = !is_gauss_id, incl_autocor = FALSE, re_formula = NA)
+      )),
+      if (is_gauss_id) NULL else trials)
   } else {
     NULL
   }
@@ -471,9 +508,34 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   mu_perturbed <- if (is_gauss_id) {
     lp_perturbed
   } else {
-    .apply_inv_link(lp_perturbed, fit$family)
+    .apply_trials(.apply_inv_link(lp_perturbed, fit$family), trials)
   }
-  mu_draws_sub <- mu_draws[seq_len(n_perturb), , drop = FALSE]
+  # --- 6b. Matched draw set for the env-inclusive budget ---
+  # The perturbed mean of draw s must be paired with the posterior-predictive
+  # residual of draw s. If n_perturb < n_draws there is no s-th perturbed mean
+  # for s > n_perturb, so the ONLY coherent options are to recycle the
+  # perturbation (which destroys Cov(mu, resid) -- see .inflate_env_predictive)
+  # or to restrict the whole budget to the draws that actually have one. Take
+  # the second: subset every draw-indexed array once, here, so that from this
+  # point on there is a single draw set and mu_draws_sub == mu_draws.
+  if (has_env_uncertainty && n_perturb < n_draws) {
+    .et_info("n_perturb (", n_perturb, ") is below n_draws (", n_draws,
+             "); restricting the prediction and the variance budget to those ",
+             n_perturb, " draws so each perturbed mean keeps its own residual. ",
+             "Leave n_perturb at its default to use every draw.")
+    keep        <- seq_len(n_perturb)
+    pp          <- pp[keep, , drop = FALSE]
+    lp          <- lp[keep, , drop = FALSE]
+    mu_draws    <- mu_draws[keep, , drop = FALSE]
+    sigma_draws <- sigma_draws[keep]
+    disp_draws  <- lapply(disp_draws, function(v) if (is.null(v)) NULL else v[keep])
+    if (!is.null(mu_pop_draws)) mu_pop_draws <- mu_pop_draws[keep, , drop = FALSE]
+    n_draws     <- n_perturb
+  }
+  # Always index by the perturbed matrix's own height: when there is no env
+  # uncertainty the branch above does not fire, yet lp_perturbed is still only
+  # n_perturb rows, and the env subtraction must compare like with like.
+  mu_draws_sub <- mu_draws[seq_len(nrow(mu_perturbed)), , drop = FALSE]
 
   # --- 7. Credible intervals ---
   # Route to posterior_predict (includes sigma) or posterior_linpred (no sigma)
@@ -484,11 +546,68 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # Full predictive draws implied by the reported forecast, with environmental
   # (driver) uncertainty folded in when applicable. Single source of truth for
   # the predictive interval AND for PIT / calibration, so all three agree.
-  predictive_draws <- if (isTRUE(include_env_in_ci) && has_env_uncertainty) {
+  # The env-inclusive predictive draws are built WHENEVER there is env
+  # uncertainty, because total_var is defined as their variance (the posterior
+  # predictive variance IS the total; see .decompose_from_arrays).
+  # include_env_in_ci governs only which of the two is reported as the interval.
+  # Two constructions, and the family decides which is correct.
+  #
+  # Gaussian identity: the location shift mu_env + (y_pp - mu) IS a draw from
+  # N(mu_env, sigma^2) with that draw's own residual, so it is exact and keeps
+  # the residual paired with its parameter draw.
+  #
+  # Any other family: the shift keeps the dispersion at mu while moving the
+  # location to mu_env, which is wrong (see .family_rng for the measured size),
+  # so redraw from the family at mu_env instead.
+  #
+  # Autocorrelation models keep the shift whatever the family: brms generates pp
+  # by iterating the fitted process forward, and (y_pp - mu) is what carries that
+  # accumulation. Redrawing from the family would discard it and collapse the
+  # forecast back to a single innovation.
+  used_family_rng <- FALSE
+  pp_env <- if (!has_env_uncertainty) {
+    pp
+  } else if (is_gauss_id || has_autocor) {
+    if (has_autocor && !is_gauss_id) {
+      .et_info("Non-Gaussian family with a residual autocorrelation term: the ",
+               "env-inclusive predictive draws use the location-shift ",
+               "construction, which preserves the autocorrelation accumulation ",
+               "but is only a first-order approximation of a draw from the ",
+               "family at the perturbed mean.")
+    }
     .inflate_env_predictive(mu_perturbed, pp, mu_draws)
   } else {
-    pp
+    fam_draws <- .family_rng(fit$family, mu_perturbed, disp_draws, trials)
+    if (is.null(fam_draws)) {
+      .et_warn("No response-distribution sampler is defined for family '",
+               fit$family$family, "'; falling back to the location-shift ",
+               "construction of the env-inclusive predictive draws. Treat ",
+               "total_var and the predictive interval as first-order ",
+               "approximations.")
+      .inflate_env_predictive(mu_perturbed, pp, mu_draws)
+    } else {
+      used_family_rng <- TRUE
+      fam_draws
+    }
   }
+
+  # Which mean does the residual channel belong to?
+  #
+  # The budget partitions Var(y~_env) = Var_s(mu*) + E_s[V(mu*)], where mu* is
+  # the mean that generated the draws. Under the family-correct redraw that is
+  # mu_env, so E_s[V(mu_env)] is the residual channel and the budget closes.
+  # Evaluating it at mu instead would leave E[V(mu_env)] - E[V(mu)] unexplained:
+  # for a log link that is the Jensen term mu (exp(b^2 d^2 / 2) - 1), measured at
+  # 0.6-4.8% of total on a Poisson fit. Under the location shift the dispersion
+  # really is the one at mu, so mu_draws is correct there.
+  #
+  # For a non-identity link this means the residual channel depends on driver
+  # uncertainty through the variance function. That is a property of the model,
+  # not an artefact: the process variance sits at the (uncertain) true driver
+  # value, not at the measured one. For Gaussian, V(mu) = sigma^2 is independent
+  # of the mean, so the choice is immaterial.
+  mu_resid <- if (used_family_rng) mu_perturbed else mu_draws
+  predictive_draws <- if (isTRUE(include_env_in_ci)) pp_env else pp
   ci_draws <- if (interval_type == "predictive") predictive_draws else lp
   ci_df <- .compute_ci(ci_draws, ci_levels)
 
@@ -496,6 +615,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # has_autocor was detected above (used to route the posterior predictive).
   decomp <- .decompose_from_arrays(
     pp           = pp,
+    pp_env       = pp_env,
     mu_draws     = mu_draws,
     mu_perturbed = mu_perturbed,
     mu_draws_sub = mu_draws_sub,
@@ -503,7 +623,9 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
     disp_draws   = disp_draws,
     has_autocor  = has_autocor,
     var_trim     = var_trim,
-    mu_pop_draws = mu_pop_draws
+    mu_pop_draws = mu_pop_draws,
+    trials       = trials,
+    mu_resid     = mu_resid
   )
 
   structure(
@@ -525,6 +647,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   drivers     = names(env_ensemble))
                            else NULL,
       n_draws            = n_draws,
+      n_perturb          = n_perturb,
       interval_type      = interval_type,
       include_env_in_ci  = isTRUE(include_env_in_ci)
     ),
@@ -877,20 +1000,27 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 # pp           : [n_draws  x n_obs] unperturbed posterior predictive draws
 # mu_draws     : [n_draws  x n_obs] unperturbed response-scale means
 .inflate_env_predictive <- function(mu_perturbed, pp, mu_draws) {
-  n_draws <- nrow(pp)
-  n_p     <- nrow(mu_perturbed)
-  # Recycle the env perturbation across ALL posterior draws so the returned
-  # predictive draws cover the same n_draws as pp (and hence the same draws the
-  # variance decomposition uses). Env perturbations are iid and exchangeable, so
-  # recycling the pattern is valid, and the first n_p rows are unchanged.
-  # Without this the interval / PIT / calibration would use only the first
-  # n_perturb draws while the decomposition uses all n_draws -- an inconsistency
-  # that is acute for autocorrelation forecasts whose far-lead draws are
-  # heavy-tailed (a few near-non-stationary draws dominate the full sample but
-  # not the truncated one).
-  idx   <- rep_len(seq_len(n_p), n_draws)
-  resid <- pp - mu_draws
-  mu_perturbed[idx, , drop = FALSE] + resid
+  # Draw-for-draw: the residual of draw s is re-centred on the env-perturbed
+  # mean of THAT SAME draw s, so
+  #   y~_env^(s) = mu_env^(s) + (y^pp,(s) - mu^(s)).
+  #
+  # All three matrices must therefore have the same number of rows. Up to
+  # v1.3.1 this function instead RECYCLED a shorter mu_perturbed across all
+  # n_draws rows (idx <- rep_len(seq_len(n_perturb), n_draws)), which paired the
+  # mean of draw s mod n_perturb with the residual of draw s and so destroyed
+  #   Cov_s(mu^(s), y^pp,(s) - mu^(s)).
+  # That covariance is ~0 for an iid fit but substantially NEGATIVE for an ar()
+  # fit, where a draw with large |phi| carries a wide accumulated residual.
+  # Destroying it inflates the predictive variance: measured on the Portal
+  # rodent series (n_perturb 500, n_draws 2000) the gap
+  # V(predictive) - V(pp) came out at 20x, 22x and 196x env_var for the three
+  # most persistent species, against 0.75-1.33x under matched pairing. Because
+  # these draws are the single source of truth for the credible interval, PIT,
+  # calibration AND shelf life, the inflation propagated to every one of them.
+  # et_predict() now subsets the whole budget to the matched draws instead
+  # (see section 6b there), so this function never has to recycle.
+  stopifnot(nrow(mu_perturbed) == nrow(pp), nrow(pp) == nrow(mu_draws))
+  mu_perturbed + (pp - mu_draws)
 }
 
 # Tail-robust (winsorized) column variance. Each column is clipped to its
@@ -974,7 +1104,14 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 .decompose_from_arrays <- function(pp, mu_draws, mu_perturbed, mu_draws_sub,
                                     family, disp_draws,
                                     has_autocor = FALSE, var_trim = 0,
-                                    mu_pop_draws = NULL) {
+                                    mu_pop_draws = NULL, pp_env = NULL,
+                                    trials = NULL, mu_resid = NULL) {
+  # pp_env: the env-inclusive posterior predictive draws (mu_env + residual,
+  # matched draw-for-draw). Defaults to pp when the caller has no environmental
+  # uncertainty, in which case the two are the same sample.
+  if (is.null(pp_env)) pp_env <- pp
+  # Mean matrix the residual channel is evaluated at; see et_predict section 7.
+  if (is.null(mu_resid)) mu_resid <- mu_draws
   n_obs <- ncol(pp)
   n_p   <- nrow(mu_perturbed)
 
@@ -1070,36 +1207,48 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   # For models with an autocor term this is the *innovation* variance
   # (E[sigma^2] for Gaussian AR(1)); the additional autocorrelation-induced
   # spread is captured in temporal_var below.
-  residual_var <- .family_residual_var(family, mu_draws, disp_draws)
+  residual_var <- .family_residual_var(family, mu_resid, disp_draws, trials)
 
-  # Sampled posterior-predictive variance on the UNPERTURBED predictors, taken
-  # tail-robustly (winsorized). By the law of total variance this equals
-  # param_var + residual_var for iid models (up to Monte Carlo error) and
-  # additionally contains the AR/MA/ARMA accumulation for autocorrelation models
-  # (brms forecasts iteratively). It does NOT contain env_var, which arises only
-  # from perturbing the predictors. Uses the SAME estimator as every other
-  # channel (see col_var above), so temporal_var is a like-for-like difference.
-  pp_var_raw <- apply(pp, 2, stats::var)
-  pp_var     <- col_var(pp)
+  # Sampled posterior-predictive variance of the ENV-INCLUSIVE predictive
+  # distribution, i.e. the distribution the reported forecast interval is drawn
+  # from. This IS total_var: the posterior predictive variance is the total
+  # predictive variance, so the budget partitions something measured rather
+  # than something defined.
+  #
+  # Up to v1.3.1 total_var was instead DEFINED as the component sum
+  #   total := param + env + residual (+ temporal)
+  # with pp_var taken on the UNPERTURBED predictors, so the shares reconciled to
+  # 100% by construction and env_var was an add-on to brms's posterior
+  # predictive variance rather than a share of it. Reviewer 1 of MEE-26-09-888
+  # objected, correctly: a predictive draw that ignores driver uncertainty is
+  # not the forecast being reported. With the perturbation moved ahead of the
+  # predictive draw (et_predict section 7) the sum is recovered as a RESULT
+  # instead of imposed, and its closure can be checked (closure_gap below, or
+  # temporal_var for autocorrelation models).
+  pp_var_raw <- apply(pp_env, 2, stats::var)
+  pp_var     <- col_var(pp_env)
+  total_var  <- pp_var
+
+  # Named channels: everything attributable to an identified source.
+  explained <- param_var + .zero_if_null(group_var) + env_var + residual_var
 
   if (isTRUE(has_autocor)) {
-    # Temporal (autocorrelation-induced) variance: the excess of the (robust)
-    # posterior-predictive variance over the iid-equivalent (param + residual)
-    # sum. For Gaussian AR(p) this is the autocorrelated accumulation of
-    # innovations beyond a single sigma^2; for ARMA / MA / cosy() / sar() /
-    # car() it absorbs whatever residual dependence structure brms is
-    # modelling — the part the analytic single-innovation residual_var cannot.
-    # Clamped at 0 to absorb small Monte Carlo noise. env is excluded from
-    # this gap because pp uses unperturbed predictors (so env is not in pp_var
-    # and must not be double-subtracted); it re-enters total_var below.
-    temporal_var <- pmax(0, pp_var -
-                            (param_var + .zero_if_null(group_var) + residual_var))
-    # Total variance now CONTAINS every component. env enters through the
-    # perturbed predictors, temporal through the AR accumulation. Defining
-    # total as the component sum makes the budget reconcile EXACTLY (law of
-    # total variance), so the reported percentage shares sum to 100%.
-    total_var <- param_var + .zero_if_null(group_var) + env_var +
-                 residual_var + temporal_var
+    # Temporal (autocorrelation-induced) variance: what the predictive
+    # distribution carries beyond the named channels. For Gaussian AR(p) this is
+    # the accumulation of innovations beyond a single sigma^2; for ARMA / MA /
+    # cosy() / sar() / car() it absorbs whatever residual dependence structure
+    # brms is modelling, the part a single-innovation residual_var cannot
+    # represent.
+    #
+    # SIGNED, not clamped at zero (changed in 1.4.0). It is a covariance term,
+    # so a negative value is meaningful: autocorrelated errors can REDUCE
+    # predictive variance relative to the independent-innovation baseline. The
+    # old pmax(., 0) hid that case, and together with the definitional total it
+    # hid closure failures too. Being the residual of a measured total, it also
+    # absorbs Monte Carlo error from the other channels, so a temporal_var of
+    # the same order as v_env_mcse is noise rather than signal.
+    temporal_var <- total_var - explained
+    closure_gap  <- NULL
     # Tail diagnostic. Computed against a fixed 1% winsorized reference
     # REGARDLESS of var_trim, because it is a statement about the model (is the
     # AR posterior near the unit root?), not about the estimator in use. The
@@ -1107,7 +1256,7 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     # (et_fit(ar_prior = ...)), not a robust summary of a divergent predictive
     # distribution: on a near-unit-root fixture the ratio falls from ~1073x under
     # brms's flat ar prior to ~1.7x under the weakly-informative default.
-    tail_ref   <- .robust_col_var(pp, trim = 0.01)
+    tail_ref   <- .robust_col_var(pp_env, trim = 0.01)
     tail_ratio <- mean(pp_var_raw, na.rm = TRUE) /
                   max(mean(tail_ref, na.rm = TRUE), .Machine$double.eps)
     if (is.finite(tail_ratio) && tail_ratio > 3) {
@@ -1122,10 +1271,15 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     }
   } else {
     temporal_var <- NULL
-    # iid: total variance is the exact law-of-total-variance sum. Using the
-    # analytic sum (rather than the noisier sampled pp variance) guarantees
-    # param + group + env + residual == total exactly.
-    total_var <- param_var + .zero_if_null(group_var) + env_var + residual_var
+    # iid: there is no fourth source, so the law of total variance says the
+    # named channels should already account for total_var. They no longer do so
+    # by definition, which makes the shortfall informative, so report it as a
+    # diagnostic instead of folding it into a channel. For a correctly specified
+    # iid model it is pure Monte Carlo error, of the order of v_env_mcse; a
+    # systematically large closure_gap means a channel is mis-estimated, or that
+    # the family's predictive draw is not a location shift of its mean (see
+    # .inflate_env_predictive).
+    closure_gap <- total_var - explained
   }
 
   out <- data.frame(
@@ -1145,6 +1299,10 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                  out[, c("env_var", "v_env_mcse", "residual_var")])
   }
   if (!is.null(temporal_var)) out$temporal_var <- temporal_var
+  # Closure of the budget against the measured posterior-predictive variance.
+  # Present only for iid models: for autocorrelation models temporal_var is
+  # itself the residual, so the gap is identically zero and carries nothing.
+  if (!is.null(closure_gap)) out$closure_gap <- closure_gap
 
   out
 }
@@ -1205,7 +1363,155 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
 #   gamma             : mu^2 / shape
 #
 # Unsupported families return NA with a warning.
-.family_residual_var <- function(family, mu_draws, disp_draws) {
+# Number of binomial trials per observation, or NULL when the family needs no
+# trials factor.
+#
+# This exists because for binomial(), posterior_linpred(transform = TRUE)
+# returns the PROBABILITY p while posterior_predict() returns a COUNT in
+# 0..n. Up to 1.3.1 the decomposition therefore ran on the probability scale
+# while the predictive draws ran on the count scale: with n = 10, residual_var
+# came back as p(1-p) instead of n p(1-p) (10x too small), param_var as Var(p)
+# instead of Var(n p) (100x too small), and the env-inflated draws added a
+# probability to a count residual, landing outside the support (measured range
+# -0.180 to 10.222). The definitional total hid all of it, being self-consistent
+# on the probability scale; the measured total of 1.4.0 reports a closure_gap of
+# 90% of total_var instead. Only binomial with trials > 1 was affected:
+# bernoulli has n = 1, and every other supported family has
+# E[y] = g^{-1}(eta) with no trials factor.
+#
+# brms::standata() would resolve the trials for us but demands the response in
+# newdata, which forecast rows do not have, so read the trials() term off the
+# formula and evaluate it against newdata.
+.binomial_trials <- function(fit, newdata, n_obs) {
+  fname <- tolower(fit$family$family %||% "")
+  if (!identical(fname, "binomial")) return(NULL)
+
+  lhs <- tryCatch(fit$formula$formula[[2L]], error = function(e) NULL)
+  if (is.null(lhs)) return(NULL)
+
+  expr <- NULL
+  walk <- function(e) {
+    if (is.call(e)) {
+      if (identical(as.character(e[[1L]]), "trials") && length(e) >= 2L) {
+        expr <<- e[[2L]]
+      }
+      for (k in seq_along(e)[-1L]) walk(e[[k]])
+    }
+  }
+  walk(lhs)
+  if (is.null(expr)) {
+    .et_warn("binomial family without a trials() term in the formula; ",
+             "treating the response as a single trial. If the model does use ",
+             "multiple trials, param_var, env_var and residual_var will be on ",
+             "the probability scale while the predictive draws are counts.")
+    return(NULL)
+  }
+
+  tr <- tryCatch(eval(expr, envir = as.data.frame(newdata)),
+                 error = function(e) NULL)
+  if (is.null(tr) || !is.numeric(tr) || anyNA(tr)) {
+    stop("Could not resolve binomial trials from '", deparse(expr),
+         "' in newdata. Supply that column in newdata (prediction requires ",
+         "it in any case).")
+  }
+  if (length(tr) == 1L) tr <- rep(tr, n_obs)
+  if (length(tr) != n_obs) {
+    stop("binomial trials resolved to length ", length(tr),
+         " but newdata has ", n_obs, " row(s).")
+  }
+  tr
+}
+
+# Scale a [draws x obs] matrix of response-scale means by a per-observation
+# trials vector. NULL trials is the identity.
+.apply_trials <- function(mu_mat, trials) {
+  if (is.null(mu_mat) || is.null(trials)) return(mu_mat)
+  sweep(mu_mat, 2L, trials, `*`)
+}
+
+# Draw from the response distribution AT a given matrix of response-scale means
+# -- the family-correct counterpart of .inflate_env_predictive()'s location
+# shift. Returns NULL for a family with no RNG defined here, so the caller can
+# fall back.
+#
+# Why this is needed: the location shift mu_env + (y_pp - mu) keeps the
+# DISPERSION of the distribution at mu while moving its LOCATION to mu_env. For
+# a Gaussian identity link that is exactly a draw at mu_env. For any other
+# family it is not. Measured on a Poisson/log fit (beta = 0.8), the shift
+# understated the predictive variance by 0.6%, 2.4% and 4.8% at perturbation SDs
+# of 0.1, 0.25 and 0.5, because E[mu_env] = mu exp(b^2 d^2 / 2) > mu under a log
+# link; and 100% of the "count" draws were non-integer with 6-8% negative. For a
+# binomial logit fit the shift barely propagated driver uncertainty at all
+# (variance flat at 2.04 while the correct value grew 2.08 -> 3.03).
+.family_rng <- function(family, mu_pred, disp_draws, trials = NULL) {
+  n_s   <- nrow(mu_pred)
+  n_obs <- ncol(mu_pred)
+  fname <- tolower(family$family %||% "gaussian")
+  N     <- length(mu_pred)
+
+  # Dispersion draws, recycled across observations to match mu_pred's layout
+  # (column-major: element (s, i) pairs with draw s).
+  get_d <- function(name) {
+    v <- disp_draws[[name]]
+    if (is.null(v) || all(is.na(v))) return(NULL)
+    v <- v[seq_len(min(n_s, length(v)))]
+    if (length(v) < n_s) v <- rep_len(v, n_s)
+    rep(v, times = n_obs)
+  }
+  shape_mat <- function(v) matrix(v, nrow = n_s, ncol = n_obs)
+  mu <- as.vector(mu_pred)
+
+  if (fname %in% c("gaussian", "normal")) {
+    sigma <- get_d("sigma"); if (is.null(sigma)) return(NULL)
+    return(shape_mat(stats::rnorm(N, mean = mu, sd = sigma)))
+  }
+  if (fname == "student") {
+    sigma <- get_d("sigma"); nu <- get_d("nu")
+    if (is.null(sigma) || is.null(nu)) return(NULL)
+    return(shape_mat(mu + sigma * stats::rt(N, df = nu)))
+  }
+  if (fname == "poisson") {
+    return(shape_mat(stats::rpois(N, lambda = pmax(mu, 0))))
+  }
+  if (fname %in% c("negbinomial", "negbinomial2", "neg_binomial_2")) {
+    shape <- get_d("shape"); if (is.null(shape)) return(NULL)
+    return(shape_mat(stats::rnbinom(N, mu = pmax(mu, 0), size = shape)))
+  }
+  if (fname == "bernoulli") {
+    return(shape_mat(stats::rbinom(N, size = 1L,
+                                   prob = pmin(pmax(mu, 0), 1))))
+  }
+  if (fname == "binomial") {
+    # mu_pred is on the COUNT scale (n p), so recover p = mu / n.
+    tr <- if (is.null(trials)) rep(1, n_obs) else trials
+    tr_v <- rep(tr, each = n_s)
+    p    <- pmin(pmax(mu / tr_v, 0), 1)
+    return(shape_mat(stats::rbinom(N, size = as.integer(tr_v), prob = p)))
+  }
+  if (fname == "gamma") {
+    shape <- get_d("shape"); if (is.null(shape)) return(NULL)
+    # brms parameterises gamma by (mu, shape): rate = shape / mu.
+    ok <- mu > 0
+    if (!all(ok)) return(NULL)
+    return(shape_mat(stats::rgamma(N, shape = shape, rate = shape / mu)))
+  }
+  if (fname == "beta") {
+    phi <- get_d("phi"); if (is.null(phi)) return(NULL)
+    m <- pmin(pmax(mu, .Machine$double.eps), 1 - .Machine$double.eps)
+    return(shape_mat(stats::rbeta(N, shape1 = m * phi,
+                                  shape2 = (1 - m) * phi)))
+  }
+  # Deliberately NOT handled: lognormal and anything else absent from
+  # .family_residual_var()'s supported set. Those families already report
+  # residual_var = NA with a warning, so a sampler here would half-support them;
+  # and for brms's lognormal, posterior_linpred(transform = TRUE) returns the
+  # MEANLOG rather than E[y], so a sampler would need a scale conversion that is
+  # not exercised anywhere. Returning NULL routes the caller to the
+  # location-shift fallback, which warns.
+  NULL
+}
+
+.family_residual_var <- function(family, mu_draws, disp_draws, trials = NULL) {
   n_obs <- ncol(mu_draws)
   n_s   <- nrow(mu_draws)
   fname <- tolower(family$family %||% "gaussian")
@@ -1235,8 +1541,12 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   }
 
   if (fname %in% c("binomial", "bernoulli")) {
-    # V(mu) = mu * (1 - mu), averaged over posterior draws.
-    return(colMeans(mu_draws * (1 - mu_draws), na.rm = TRUE))
+    # V(y) = n p (1 - p) with mu = n p, i.e. mu * (1 - mu / n). mu_draws is on
+    # the COUNT scale (see .binomial_trials), so divide by the trials to get p.
+    # bernoulli has n = 1, where this reduces to the familiar mu * (1 - mu).
+    tr <- if (is.null(trials)) 1 else trials
+    p  <- sweep(mu_draws, 2L, tr, `/`)
+    return(colMeans(mu_draws * (1 - p), na.rm = TRUE))
   }
 
   if (fname == "poisson") {
@@ -1324,10 +1634,19 @@ print.et_prediction <- function(x, ...) {
   cat(sprintf("    Environmental: %.4f  (MC SE: %.4f)\n",
               mean(decomp$env_var), mean(decomp$v_env_mcse)))
   cat(sprintf("    Residual     : %.4f\n", mean(decomp$residual_var, na.rm = TRUE)))
-  if ("temporal_var" %in% colnames(decomp)) {
-    cat(sprintf("    Temporal     : %.4f\n", mean(decomp$temporal_var, na.rm = TRUE)))
+  if ("group_var" %in% colnames(decomp)) {
+    cat(sprintf("    Group        : %.4f\n", mean(decomp$group_var, na.rm = TRUE)))
   }
-  cat(sprintf("    Total        : %.4f\n", mean(decomp$total_var)))
+  if ("temporal_var" %in% colnames(decomp)) {
+    cat(sprintf("    Temporal     : %.4f  (signed remainder)\n",
+                mean(decomp$temporal_var, na.rm = TRUE)))
+  }
+  cat(sprintf("    Total        : %.4f  (measured predictive variance)\n",
+              mean(decomp$total_var)))
+  if ("closure_gap" %in% colnames(decomp)) {
+    cat(sprintf("    Closure gap  : %.4f  (Monte Carlo; compare MC SE above)\n",
+                mean(decomp$closure_gap, na.rm = TRUE)))
+  }
   invisible(x)
 }
 

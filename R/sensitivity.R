@@ -72,8 +72,9 @@
 #'       forecast observations.}
 #'     \item{\code{env_share}}{\code{env_var / total_var} --- the fraction
 #'       of total predictive variance attributable to predictor noise.
-#'       Because \code{total_var} now contains \code{env_var} as a sub-share
-#'       (law of total variance), this is bounded in \eqn{[0, 1]}.}
+#'       \code{total_var} is the measured variance of the env-inclusive
+#'       posterior predictive draws, so \code{env_var} is a genuine sub-share
+#'       of it and this sits in \eqn{[0, 1]} up to Monte Carlo error.}
 #'     \item{\code{ci_width_mean, ci_width_max}}{At \code{ci_level}.}
 #'     \item{\code{ratio_mean, ratio_max}}{CI width / plausible range.}
 #'     \item{\code{horizon_type}}{One of \code{"observed"}, \code{"projected"},

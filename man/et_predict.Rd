@@ -143,8 +143,18 @@ capped at the number of draws available in the fit).}
 (default \code{c(0.5, 0.8, 0.9, 0.95)}).}
 
 \item{n_perturb}{Integer.  Number of posterior draws used for the
-environmental perturbation step (default \code{min(500, n_draws)}).
-Reducing this speeds up computation.}
+environmental perturbation step (default \code{n_draws}, i.e.\ every draw).
+Reducing it speeds up the perturbation at the cost of a smaller sample for
+\emph{the whole env-inclusive budget}: the perturbed mean of draw \eqn{s}
+must be paired with the residual of that same draw \eqn{s}, so when
+\code{n_perturb < n_draws} and environmental uncertainty is present, the
+predictive draws and every decomposition channel are computed on the first
+\code{n_perturb} draws rather than recycling the perturbation across all
+of them.  Recycling would destroy
+\eqn{\mathrm{Cov}(\mu^{(s)}, y^{pp,(s)} - \mu^{(s)})}, which is
+substantially negative for an \code{ar()} fit and inflates the predictive
+variance (measured at up to 196x \code{env_var} on a near-unit-root
+series).  Leave at the default unless the perturbation is the bottleneck.}
 
 \item{n_env_draws}{Integer.  Number of independent environmental
 perturbations averaged \emph{per posterior draw} when estimating
@@ -176,15 +186,24 @@ setting.}
 environmental (predictor) uncertainty is folded into the credible
 interval when \code{interval_type = "predictive"}.  When \code{TRUE},
 intervals are built from \strong{environmentally inflated} draws in which
-each posterior-predictive residual is re-centred on the env-perturbed
-response-scale mean, \eqn{\tilde y = \tilde\mu + (y^{pp} - \mu)}
-(family-general; for Gaussian identity this equals
-\eqn{\tilde{\mathrm{lp}} + \varepsilon}, \eqn{\varepsilon\sim N(0,\sigma^2)}).
-The interval variance is then param + env + residual, coherent with the
-env-inclusive \code{total_var}.  The default \code{NULL} means
-\strong{auto}: env is folded in whenever the caller supplied non-zero
-\code{env_noise}, and omitted otherwise.  Pass \code{FALSE} to force a
-parameter + residual interval even when \code{env_noise} is given.}
+the draws are generated at the env-perturbed mean.  For a Gaussian identity
+link that is the location shift
+\eqn{\tilde y = \tilde\mu + (y^{pp} - \mu)}, which is exactly a draw from
+\eqn{N(\tilde\mu, \sigma^2)} carrying that draw's own residual.  For any
+other family the draw is taken from the response distribution \emph{at}
+\eqn{\tilde\mu}, since the shift would keep the dispersion at \eqn{\mu}
+while moving only the location (for a count model it also produced
+non-integer and negative draws).  Models with a residual autocorrelation
+term keep the shift whatever the family, because \eqn{y^{pp} - \mu} is what
+carries the \code{brms} forward iteration; such a fit reports a
+first-order approximation and says so.
+The interval variance is then param + env + residual, coherent with
+\code{total_var}.  The default \code{NULL} means \strong{auto}: env is
+folded in whenever the caller supplied non-zero \code{env_noise}, and
+omitted otherwise.  Pass \code{FALSE} to force a parameter + residual
+interval even when \code{env_noise} is given --- note that this makes the
+reported interval deliberately narrower than \code{total_var} implies,
+since \code{total_var} is always the variance of the env-inclusive draws.}
 
 \item{var_trim}{Numeric in \eqn{[0, 0.5)}, default \code{0}.  Winsorization
   applied when computing \emph{every} variance channel of the decomposition:
@@ -220,8 +239,13 @@ An \code{et_prediction} object (list) containing:
   \item{\code{credible_intervals}}{data.frame with columns
     \code{row_id, ci_level, lower, median, upper, width}.}
   \item{\code{decomposition}}{data.frame with columns
-    \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var}.
+    \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var},
+    plus \code{temporal_var} for autocorrelation models or
+    \code{closure_gap} for iid ones.
     All components are on the \strong{response scale}.
+    \code{total_var} is the \strong{measured} variance of the env-inclusive
+    predictive draws, not the sum of the channels; see
+    \code{\link{decompose_uncertainty}}.
     \code{v_env_mcse} is the Monte Carlo SE of \code{env_var}.
     \code{residual_var} is per-observation for non-Gaussian families
     (e.g.\ Binomial: \eqn{E_s[\mu^{(s)}(1-\mu^{(s)})]}) and constant

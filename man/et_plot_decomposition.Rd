@@ -10,9 +10,13 @@ et_plot_decomposition(decomp, proportional = TRUE, group_col = NULL)
 \item{decomp}{A \code{data.frame} from \code{\link{decompose_uncertainty}}
 or directly the \code{$decomposition} slot of an \code{et_prediction}.}
 
-\item{proportional}{Logical.  If \code{TRUE} (default), bars are scaled to
-sum to 1 (proportional contribution).  If \code{FALSE}, raw variances
-are shown.}
+\item{proportional}{Logical.  If \code{TRUE} (default), each component is
+shown as a share of \code{total_var} (the measured predictive variance).
+Shares therefore sum to 1 exactly for autocorrelation models and to within
+Monte Carlo error for iid ones, where the shortfall is the
+\code{closure_gap} column.  If \code{FALSE}, raw variances are shown.
+Because \code{temporal_var} is signed, a negative component is drawn below
+the zero line rather than silently clamped.}
 
 \item{group_col}{Character.  Optional name of a grouping column in
 \code{decomp} (present for grouped predictions).}

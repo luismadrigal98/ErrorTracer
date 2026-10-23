@@ -162,6 +162,17 @@ shelf_life <- function(predictions,
                        projection_alpha = 0.05,
                        ...,
                        plausible_range = NULL) {
+  # time_col is a column NAME, not a vector of times. Passing the column itself
+  # (shelf_life(..., time_col = df$year), or time = df$year, which partial-matches
+  # to time_col) used to reach `time_col %in% colnames(...)` as a length-n
+  # logical and fail deep in the call stack with "'length = 16' in coercion to
+  # 'logical(1)'". Say so here instead.
+  if (!is.null(time_col) &&
+      !(is.character(time_col) && length(time_col) == 1L)) {
+    stop("time_col must be a single column name (a character string), not the ",
+         "column itself. Received ", class(time_col)[1], " of length ",
+         length(time_col), ".")
+  }
   # Deprecated alias: plausible_range -> response_scale. Re-call (rather than
   # reassign) because UseMethod() dispatches with the originally-supplied
   # arguments, not values modified in this frame.

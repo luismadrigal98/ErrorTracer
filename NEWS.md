@@ -1,3 +1,162 @@
+# ErrorTracer 1.4.0
+
+Corrects the environmentally inflated predictive draws, which were built by
+recycling the predictor perturbation across posterior draws, and redefines
+`total_var` as the measured posterior predictive variance rather than the sum of
+its parts. **Any reported variance budget, credible interval, PIT, calibration
+or shelf life from an autocorrelation model should be recomputed**; iid models
+are affected only at the level of Monte Carlo error.
+
+## Bug fixes
+
+* **The predictor perturbation was recycled across posterior draws, inflating
+  the predictive variance of autocorrelation models.**
+  `et_predict()` perturbed only the first `n_perturb` draws (default 500) and
+  `.inflate_env_predictive()` then recycled that block across all `n_draws`
+  (default 2000) rows,
+
+  ```
+  idx <- rep_len(seq_len(n_perturb), n_draws)
+  mu_perturbed[idx, ] + (pp - mu_draws)
+  ```
+
+  so for three quarters of the rows the env-perturbed mean of draw
+  `s mod n_perturb` was paired with the posterior-predictive residual of draw
+  `s`. That destroys `Cov_s(mu^(s), y^pp,(s) - mu^(s))`. The covariance is
+  approximately zero for an iid fit, but substantially *negative* for an `ar()`
+  fit, where a draw with large `|phi|` carries a wide accumulated residual, so
+  the predictive variance was biased upward. On an annual rodent series
+  (`n_perturb = 500`, `n_draws = 2000`) the gap `V(predictive) - V(pp)`, which
+  should equal `env_var`, came out at 20x, 22x and 196x `env_var` for the three
+  most persistent species, against 0.75-1.33x under matched pairing. Because
+  these draws are the single source of truth for the credible interval, PIT,
+  calibration *and* shelf life, the inflation reached all four: 90% intervals
+  were 1-12% too wide and shelf lives correspondingly one to two periods early.
+
+  `n_perturb` now defaults to `n_draws`, so every draw carries its own
+  perturbation and nothing is recycled. When `n_perturb` is set below `n_draws`
+  the prediction and the whole variance budget are restricted to those draws
+  instead, with a message; `.inflate_env_predictive()` errors on mismatched
+  draw counts rather than recycling.
+
+  **This changes a returned dimension.** With `env_noise` (or `env_ensemble`)
+  supplied and `n_perturb < n_draws`, `posterior_predict`, `posterior_linpred`,
+  `predictive_draws` and `lp_perturbed` all now have `n_perturb` rows, and the
+  returned `n_draws` records that effective count (`n_perturb` is recorded
+  too). Every array in the object therefore describes one draw set, which is
+  what makes `total_var`, the interval, PIT, calibration and shelf life
+  mutually consistent. Code that relied on `nrow(posterior_predict) == n_draws`
+  while sub-sampling the perturbation should either drop `n_perturb` (the
+  default now uses every draw) or read the count off the object.
+
+* **`binomial()` with `trials(n > 1)` decomposed on the probability scale while
+  the predictive draws were counts.** `posterior_linpred(transform = TRUE)`
+  returns the probability `p`, but `posterior_predict()` returns a count in
+  `0..n`, and the decomposition used the former throughout. With `n = 10`:
+  `residual_var` came back as `p(1-p)` instead of `n p(1-p)`, ten times too
+  small; `param_var` as `Var(p)` instead of `Var(n p)`, a hundred times too
+  small; the reported environmental share was 0.02-0.50% where the correct
+  values are 2-34%; and the env-inflated draws added a probability to a count
+  residual, landing outside the support (measured range -0.180 to 10.222).
+  The predictive variance was effectively **flat in the perturbation SD**
+  (2.04 at every level, against a correct 2.08 to 3.03), so driver uncertainty
+  was barely propagated at all.
+
+  Response-scale means are now scaled to `n p`, putting the whole budget on the
+  same scale as the predictive draws, and the binomial branch of the residual
+  variance carries the trials factor. The trials are read off the `trials()`
+  term in the formula and evaluated against `newdata`.
+
+  Under 1.3.1 none of this was visible: `total_var` was *defined* as the channel
+  sum, self-consistent on the probability scale, while `credible_intervals` came
+  from the predictive draws on the count scale, so the reported budget and the
+  reported interval disagreed by a factor of ten with nothing to flag it. The
+  measured total of this release reports it as a `closure_gap` of ~90% of
+  `total_var`. **Only `binomial` with trials > 1 was affected**; `bernoulli`
+  has `n = 1`, and for every other supported family `E[y] = g^-1(eta)` with no
+  trials factor.
+
+  It survived because the only binomial test in the suite used
+  `brms::bernoulli()` with `size = 1`, where `p == n p`.
+
+* **The env-inclusive predictive draws were always a location shift, which is
+  wrong for any non-Gaussian family.** `mu_env + (y_pp - mu)` keeps the
+  *dispersion* of the distribution at `mu` while moving its *location* to
+  `mu_env`. For a Gaussian identity link that is exactly a draw from
+  `N(mu_env, sigma^2)`; otherwise it is not. Measured on a Poisson/log fit
+  (beta = 0.8), the predictive variance was understated by 0.6%, 2.4% and 4.8%
+  at perturbation SDs of 0.1, 0.25 and 0.5, because `E[mu_env] = mu
+  exp(b^2 d^2 / 2)` under a log link; and **100% of the draws for a count model
+  were non-integer, with 6-8% negative**, which PIT and calibration were then
+  computed from.
+
+  `et_predict()` now redraws from the response distribution at the perturbed
+  mean (`.family_rng()`) for gaussian, student, poisson, negbinomial,
+  bernoulli, binomial, gamma and beta, the same set the residual channel
+  supports. The residual channel is
+  evaluated at the mean that generated the draws, so the Jensen term is
+  attributed rather than left in `closure_gap`; for a non-identity link this
+  means `residual_var` depends on driver uncertainty through the variance
+  function, which is a property of the model rather than an artefact. After the
+  fix the measured total agrees with
+  `Var(mu_env) + E[V(mu_env)]` to within 1.7% (Poisson) and 0.6% (binomial),
+  and no draw falls outside the support.
+
+  Two cases keep the location shift. **Gaussian identity**, where it is exact
+  and keeps each residual paired with its own parameter draw; the Portal
+  replay is bit-for-bit unchanged. And **any family with a residual
+  autocorrelation term**, because `brms` generates the posterior predictive by
+  iterating the fitted process forward and `(y_pp - mu)` is what carries that
+  accumulation, so redrawing would collapse the forecast to a single
+  innovation. A non-Gaussian autocorrelation model therefore reports a
+  first-order approximation and says so. A family with no sampler defined falls
+  back to the shift with a warning.
+
+## Changes to the decomposition
+
+* **`total_var` is now measured, not defined.** It is the sampled variance of
+  the environmentally inclusive posterior predictive draws, i.e. the
+  distribution the reported credible interval is drawn from. Previously it was
+  *defined* as `param_var + env_var + residual_var (+ temporal_var)`, with the
+  posterior predictive variance taken on the **unperturbed** predictors, so the
+  shares reconciled to 100% by construction and `env_var` was an add-on to a
+  predictive variance that did not contain it. The component sum is now
+  recovered as a result instead of imposed.
+
+* **`temporal_var` is signed.** It is the remainder
+  `total_var - (param_var + env_var + residual_var)` and is no longer clamped at
+  zero. A negative value is meaningful: autocorrelated errors can reduce
+  predictive variance relative to the independent-innovation baseline. Being a
+  remainder it also absorbs Monte Carlo error from the other channels, so read a
+  `temporal_var` of the same order as `v_env_mcse` as noise.
+
+* **New `closure_gap` column for iid models**, reporting
+  `total_var - (param_var + env_var + residual_var)`. For a correctly specified
+  iid model it is Monte Carlo error, of the order of `v_env_mcse`; a
+  systematically large value means a channel is mis-estimated.
+
+* `include_env_in_ci` now governs only which draws are *reported* as the
+  interval. The env-inclusive draws are always built when there is
+  environmental uncertainty, because `total_var` is their variance.
+
+* The budget-closure tests no longer assert an identity. Checking
+  `total_var == param_var + env_var + residual_var` to `1e-8` was tautological
+  while `total_var` was defined as that sum; the suite now bounds the closure
+  gap by its Monte Carlo scale, `3 * sqrt(2 / n_eff)` on the median relative
+  gap (`expect_budget_closes()`), and asserts the exact identity only where
+  `temporal_var` makes it exact by construction.
+
+* `shelf_life()` now rejects a `time_col` that is a column rather than a column
+  name. Passing `time_col = df$year`, or `time = df$year` (which partial-matches
+  to `time_col`), used to fail deep in the call stack with
+  `'length = 16' in coercion to 'logical(1)'`.
+
+* `et_plot_decomposition(proportional = TRUE)` normalises against `total_var`
+  rather than against the plotted component sum, so the iid closure gap is
+  visible instead of being rescaled away, and a negative component is drawn
+  below the zero line rather than silently clamped. The plot now also includes
+  `group_var` when present.
+
 # ErrorTracer 1.3.1
 
 Corrects `shelf_life()`, which could report a forecast horizon that rested on a
