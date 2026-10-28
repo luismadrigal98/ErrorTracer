@@ -21,7 +21,15 @@
 #'   Because \code{temporal_var} is signed, a negative component is drawn below
 #'   the zero line rather than silently clamped.
 #' @param group_col Character.  Optional name of a grouping column in
-#'   \code{decomp} (present for grouped predictions).
+#'   \code{decomp} (present for grouped predictions).  One bar is drawn per
+#'   group: the components are summed over the group's observations and
+#'   divided by the summed \code{total_var}, so the bar still sums to 1.  That
+#'   is a variance-weighted share, equal to
+#'   \code{mean(component) / mean(total_var)}, and it is the quantity to quote
+#'   alongside the figure.  It is not the mean of the per-observation shares,
+#'   which would weight a low-variance lead equally with a high-variance one;
+#'   for an autocorrelation model, where predictive variance grows with lead
+#'   time, the two can differ by tens of percentage points.
 #' @return A \code{ggplot2} object.
 #' @export
 et_plot_decomposition <- function(decomp, proportional = TRUE,
@@ -30,6 +38,25 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
                   if ("group_var" %in% colnames(decomp)) "group_var",
                   "env_var", "residual_var",
                   if ("temporal_var" %in% colnames(decomp)) "temporal_var")
+
+  grouped <- !is.null(group_col) && group_col %in% colnames(decomp)
+
+  # One bar per group puts many observations on one x position. Stacking their
+  # per-observation shares would make the bar sum to the NUMBER OF OBSERVATIONS
+  # rather than to 1 -- the y axis then reads 16 on a 16-step window while
+  # still being labelled a share. Aggregating first is also the only way the
+  # bar can match the share reported in prose, which divides the mean component
+  # by the mean total rather than averaging the per-observation ratios.
+  if (grouped) {
+    keep <- c(components, "total_var")
+    keep <- keep[keep %in% colnames(decomp)]
+    agg  <- stats::aggregate(decomp[keep],
+                             by  = list(decomp[[group_col]]),
+                             FUN = function(x) sum(x, na.rm = TRUE))
+    names(agg)[1]    <- group_col
+    agg[["obs_id"]]  <- seq_len(nrow(agg))
+    decomp           <- agg
+  }
 
   # Normalise against the MEASURED total rather than against the component sum.
   # position = "fill" would divide by the sum of the plotted components, which
@@ -78,8 +105,14 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
       x     = if (x_col == "obs_id") "Observation" else x_col,
       y     = if (proportional) "Share of predictive variance" else "Variance"
     ) +
-    et_theme() +
-    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+    et_theme()
+
+  # Angled ticks earn their place for a long run of observation ids; for a
+  # handful of group names they are just harder to read.
+  if (x_col == "obs_id") {
+    p <- p + ggplot2::theme(
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+  }
 
   # Make the zero line visible whenever a signed component can cross it.
   if (has_negative) {
@@ -88,6 +121,71 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
   }
 
   p
+}
+
+# ______________________________________________________________________________
+# Where to put the threshold tag.
+#
+# A fixed anchor at the left edge is wrong as often as it is right: on a panel
+# carrying several series the left edge is usually where they start, so the tag
+# lands on top of them and the reviewer cannot read it. This scores a grid of x
+# positions by how much clear vertical room there is beside the threshold line,
+# above it and below it, counting only points that are actually VISIBLE (a
+# capped panel hides the rest), and returns the roomiest. Ties keep the
+# leftmost position, which is where a reader looks first.
+.threshold_anchor <- function(x, y, hline, ylim = NULL, n_grid = 25L) {
+  fallback <- list(where = "panel",
+                   x = if (length(x)) min(x, na.rm = TRUE) else 0,
+                   hjust = 0, vjust = -0.2)
+  ok <- is.finite(x) & is.finite(y)
+  if (!is.null(ylim)) ok <- ok & y >= min(ylim) & y <= max(ylim)
+  x <- x[ok]; y <- y[ok]
+  if (length(x) < 2L) return(fallback)
+  rng <- range(x)
+  if (!is.finite(diff(rng)) || diff(rng) <= 0) return(fallback)
+
+  # Room to the panel edge when nothing lies on that side at all.
+  top <- if (!is.null(ylim)) max(ylim) else max(y, hline)
+  bot <- if (!is.null(ylim)) min(ylim) else min(y, hline)
+
+  grid <- seq(rng[1L], rng[2L], length.out = n_grid)
+  win  <- diff(rng) * 0.10
+  best <- list(score = -Inf)
+  for (gx in grid) {
+    near <- abs(x - gx) <= win
+    if (!any(near)) next
+    yy    <- y[near]
+    above <- yy[yy > hline]
+    below <- yy[yy < hline]
+    room_above <- if (length(above)) min(above) - hline else top - hline
+    room_below <- if (length(below)) hline - max(below) else hline - bot
+    for (cand in list(list(score = room_above, vjust = -0.2),
+                      list(score = room_below, vjust =  1.2))) {
+      if (cand$score > best$score) {
+        best <- list(score = cand$score, x = gx, vjust = cand$vjust)
+      }
+    }
+  }
+  if (!is.finite(best$score)) return(fallback)
+
+  # Clearance is only useful measured against the size of the thing being
+  # placed. The tag is about a tenth of the panel high, so a gap narrower than
+  # that is not a gap: the series would run through the box. When no position
+  # on the line clears it -- which is the normal case for several series that
+  # all hover near the threshold, since that is what makes the threshold worth
+  # drawing -- the tag goes outside the panel at the end of the line, where it
+  # cannot collide with anything.
+  y_span <- (if (!is.null(ylim)) diff(range(ylim)) else diff(range(c(y, hline))))
+  if (!is.finite(y_span) || y_span <= 0) return(fallback)
+  if (best$score < 0.10 * y_span) {
+    return(list(where = "margin", x = rng[2L], hjust = 0, vjust = 0.5))
+  }
+
+  # Keep the box inside the panel: anchor it by whichever edge it is nearest.
+  pos <- (best$x - rng[1L]) / diff(rng)
+  best$hjust <- if (pos < 0.25) 0 else if (pos > 0.75) 1 else 0.5
+  best$where <- "panel"
+  best
 }
 
 # ******************************************************************************
@@ -102,16 +200,26 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
 #' @param sl An \code{et_shelf_life} object from \code{\link{shelf_life}}.
 #' @param show_ratio Logical.  If \code{TRUE} (default), plots the
 #'   ratio (CI width / plausible range) rather than raw CI width.
+#' @param max_ratio Numeric.  Optional upper limit for the y axis, applied as a
+#'   zoom (\code{coord_cartesian}) rather than a filter, so nothing is dropped
+#'   and a trace that exceeds it runs off the top of the panel.  Use it when
+#'   one series sits an order of magnitude above the rest and compresses them
+#'   against the axis; say in the caption that the panel is capped.
+#'   \code{NULL} (default) fits all of the data.
 #' @return A \code{ggplot2} object.
 #' @export
-et_plot_shelf_life <- function(sl, show_ratio = TRUE) {
+et_plot_shelf_life <- function(sl, show_ratio = TRUE, max_ratio = NULL) {
   y_col  <- if (show_ratio) "ratio"    else "ci_width"
   hline  <- if (show_ratio) 1.0        else unique(sl$plausible_range)[1]
   y_lab  <- if (show_ratio) "CI width / plausible range" else "CI width"
-  hline_lab <- if (show_ratio) "Uninformative threshold (ratio = 1)"
+  hline_lab <- if (show_ratio) "Uninformative threshold"
                else "Plausible range"
 
   has_group <- "group" %in% colnames(sl)
+
+  tag <- .threshold_anchor(sl[["time"]], sl[[y_col]], hline,
+                           ylim = if (!is.null(max_ratio) && is.finite(max_ratio))
+                                    c(0, max_ratio) else NULL)
 
   p <- ggplot2::ggplot(sl, ggplot2::aes(
     x     = .data[["time"]],
@@ -122,8 +230,6 @@ et_plot_shelf_life <- function(sl, show_ratio = TRUE) {
     ggplot2::geom_line(linewidth = 0.9) +
     ggplot2::geom_point(size = 2.5) +
     ggplot2::geom_hline(yintercept = hline, linetype = "dashed", color = "grey40") +
-    ggplot2::annotate("text", x = min(sl$time), y = hline * 1.04,
-                      label = hline_lab, hjust = 0, color = "grey40", size = 3) +
     ggplot2::labs(
       title = "Forecast Shelf Life",
       x     = "Time",
@@ -132,7 +238,32 @@ et_plot_shelf_life <- function(sl, show_ratio = TRUE) {
     ) +
     et_theme()
 
+  if (tag$where == "panel") {
+    p <- p + ggplot2::annotate("label", x = tag$x, y = hline,
+                               label = hline_lab,
+                               hjust = tag$hjust, vjust = tag$vjust,
+                               colour = "grey20", fill = "white", size = 3.5)
+  } else {
+    # Outside the panel, as a break on a secondary axis at the line's own
+    # value. Annotating into the margin would need clip = "off", which stops
+    # clipping the data too and lets a steep series run across the title.
+    p <- p +
+      ggplot2::scale_y_continuous(
+        sec.axis = ggplot2::sec_axis(~ ., breaks = hline,
+                                     labels = sub(" ", "\n", hline_lab))) +
+      ggplot2::theme(
+        axis.text.y.right  = ggplot2::element_text(colour = "grey20", size = 8,
+                                                   lineheight = 0.95, hjust = 0),
+        axis.ticks.y.right = ggplot2::element_blank(),
+        axis.title.y.right = ggplot2::element_blank())
+  }
+
   if (has_group) p <- p + ggplot2::scale_color_viridis_d()
+
+  # A zoom, not a filter: the traces still run to the panel edge.
+  if (!is.null(max_ratio) && is.finite(max_ratio)) {
+    p <- p + ggplot2::coord_cartesian(ylim = c(0, max_ratio))
+  }
 
   p
 }

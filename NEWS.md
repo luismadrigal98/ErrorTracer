@@ -1,3 +1,45 @@
+# ErrorTracer 1.4.1
+
+Corrects plotting functions and axis for the predictive variance shares.
+
+## Bug fixes
+
+* **`et_plot_decomposition(group_col = )` drew a sum of shares on an axis
+  labelled as a share.** Each component was divided by that row's `total_var`
+  and the rows were then stacked at one x position per group, so a group with
+  `H` forecast observations produced a bar of height `H` (16 on an annual
+  rodent window, 15 on the bundled simulation) while the axis still read
+  "Share of predictive variance". The colour proportions were unaffected, so
+  the picture was right and the axis was not.
+
+  Rows are now aggregated before normalising: each component is summed over
+  the group and divided by the summed `total_var`. That also makes the bar
+  equal to `mean(component) / mean(total_var)`, the variance-weighted share
+  that `decompose_uncertainty()` summaries report, rather than the mean of the
+  per-observation ratios. The two differ whenever predictive variance varies
+  across the window, which is what an `ar()` model does by construction: on the
+  rodent panel the most persistent species read 78.7% temporal as a mean of
+  ratios against 96.1% as a share of summed variance. Ungrouped plots, one bar
+  per observation, are unchanged.
+
+* **`et_plot_shelf_life()` gained `max_ratio`** for the case where one series
+  sits an order of magnitude above the rest and compresses them against the
+  axis. It is applied through `coord_cartesian()`, so it zooms rather than
+  filters and a trace that exceeds it runs off the top of the panel rather
+  than disappearing from the data.
+
+* **The threshold tag is no longer pinned to the left edge of the panel**,
+  which is where series that hover around the threshold begin, so it was drawn
+  on top of them. Placement is now chosen by clearance: a grid of x positions
+  is scored by how much room there is beside the line, above and below,
+  counting only points the panel actually shows, and the tag takes the
+  roomiest. When no position clears the height of the tag -- the normal case
+  for several series near one threshold, which is what makes the threshold
+  worth drawing -- it moves out of the panel onto a secondary-axis break at
+  the line's own value, where it cannot collide with anything. (Annotating
+  into the margin instead would need `clip = "off"`, which also stops clipping
+  the data and lets a steep series run across the title.)
+
 # ErrorTracer 1.4.0
 
 Corrects the environmentally inflated predictive draws, which were built by
@@ -6,8 +48,6 @@ recycling the predictor perturbation across posterior draws, and redefines
 its parts. **Any reported variance budget, credible interval, PIT, calibration
 or shelf life from an autocorrelation model should be recomputed**; iid models
 are affected only at the level of Monte Carlo error.
-
-## Bug fixes
 
 * **The predictor perturbation was recycled across posterior draws, inflating
   the predictive variance of autocorrelation models.**

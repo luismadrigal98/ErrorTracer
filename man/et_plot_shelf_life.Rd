@@ -4,13 +4,20 @@
 \alias{et_plot_shelf_life}
 \title{Plot forecast shelf life}
 \usage{
-et_plot_shelf_life(sl, show_ratio = TRUE)
+et_plot_shelf_life(sl, show_ratio = TRUE, max_ratio = NULL)
 }
 \arguments{
 \item{sl}{An \code{et_shelf_life} object from \code{\link{shelf_life}}.}
 
 \item{show_ratio}{Logical.  If \code{TRUE} (default), plots the
 ratio (CI width / plausible range) rather than raw CI width.}
+
+\item{max_ratio}{Numeric.  Optional upper limit for the y axis, applied as a
+zoom (\code{coord_cartesian}) rather than a filter, so nothing is dropped
+and a trace that exceeds it runs off the top of the panel.  Use it when
+one series sits an order of magnitude above the rest and compresses them
+against the axis; say in the caption that the panel is capped.
+\code{NULL} (default) fits all of the data.}
 }
 \value{
 A \code{ggplot2} object.

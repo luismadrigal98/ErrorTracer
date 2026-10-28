@@ -19,7 +19,15 @@ Because \code{temporal_var} is signed, a negative component is drawn below
 the zero line rather than silently clamped.}
 
 \item{group_col}{Character.  Optional name of a grouping column in
-\code{decomp} (present for grouped predictions).}
+\code{decomp} (present for grouped predictions).  One bar is drawn per
+group: the components are summed over the group's observations and
+divided by the summed \code{total_var}, so the bar still sums to 1.  That
+is a variance-weighted share, equal to
+\code{mean(component) / mean(total_var)}, and it is the quantity to quote
+alongside the figure.  It is not the mean of the per-observation shares,
+which would weight a low-variance lead equally with a high-variance one;
+for an autocorrelation model, where predictive variance grows with lead
+time, the two can differ by tens of percentage points.}
 }
 \value{
 A \code{ggplot2} object.
