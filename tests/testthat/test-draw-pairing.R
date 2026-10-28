@@ -161,3 +161,42 @@ test_that("with no perturbation total_var reduces to the plain predictive varian
   expect_equal(d$env_var, rep(0, f$n_obs))
   expect_equal(d$v_env_mcse, rep(0, f$n_obs))
 })
+
+# ── et_predict(seed = ): prediction draws are reproducible ───────────────────
+# The posterior-predictive draw and the driver perturbation both come from the
+# R RNG. Left unseeded, the same fit predicted twice gives different intervals,
+# and which numbers you get depends on what consumed the stream earlier in the
+# session. That is how two scripts in this project came to disagree about the
+# same forecast origin by one lead: both seeded et_fit(), neither seeded the
+# prediction.
+
+test_that(".resolve_pred_seed falls back to the fit's own seed", {
+  m <- structure(list(config = list(seed = 1998L)), class = "et_model")
+  expect_equal(ErrorTracer:::.resolve_pred_seed(NULL, m), 1998L)   # inherited
+  expect_equal(ErrorTracer:::.resolve_pred_seed(7L, m),    7L)     # explicit wins
+  expect_null(ErrorTracer:::.resolve_pred_seed(NA, m))             # opt out
+})
+
+test_that(".resolve_pred_seed returns NULL when nothing supplies one", {
+  m <- structure(list(config = list()), class = "et_model")
+  expect_null(ErrorTracer:::.resolve_pred_seed(NULL, m))
+})
+
+test_that("seeding the draws leaves the caller's stream where it was", {
+  # The contract the method relies on: set.seed() inside, stream restored on
+  # exit, so a seeded prediction never silently reruns the caller's draws.
+  f <- function(seed) {
+    if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      old <- get(".Random.seed", envir = globalenv())
+      on.exit(assign(".Random.seed", old, envir = globalenv()), add = TRUE)
+    }
+    set.seed(seed)
+    rnorm(5)
+  }
+  set.seed(99)
+  before <- runif(3)
+  set.seed(99)
+  a <- f(1998L)
+  expect_equal(runif(3), before)       # caller's stream untouched
+  expect_equal(f(1998L), a)            # and the seeded draws repeat
+})

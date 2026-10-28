@@ -1,122 +1,89 @@
 ## Summary
 
-This is a bug-fix release (1.3.1). It supersedes 1.3.0, which was prepared but
-never submitted, so this submission carries the fixes from both. 1.3.0's fix is
-summarised second below; the new 1.3.1 material comes first.
+This is a bug-fix release (1.4.1). The version on CRAN is 1.3.1, so this
+submission carries the 1.4.0 material as well; 1.4.0 was prepared but never
+submitted. The 1.4.1 fixes come first, then 1.4.0.
 
-**Please note a deliberate change in default output, in two functions.**
-`shelf_life()` now requires a threshold crossing to persist before reporting it
-as a forecast horizon, and no longer extrapolates a trend that is statistically
-indistinguishable from flat. `et_skill_score()` likewise now requires a run of
-non-skillful periods before declaring a null-relative forecast limit. All three
-changes correct results that were wrong rather than merely conservative, so any
-horizon or forecast limit computed with 1.2.x or 1.3.0 should be recomputed
-rather than trusted. The previous behaviour remains reachable via
-`min_run = 1` (both functions) and `projection_alpha = 1`. I have kept this as a
-patch release because these are defect fixes and the old behaviour is fully
-recoverable, but I am flagging the behaviour changes explicitly rather than
-leaving a reviewer to discover them.
+**Please note two changes in default output and one in reproducibility.**
+`decompose_uncertainty()` now reports `total_var` as the *measured* posterior
+predictive variance rather than the sum of its channels, and `temporal_var` as
+a signed remainder rather than a floored one. `et_predict()` now seeds its own
+draws. All three correct results that were wrong rather than merely
+conservative: **any variance budget, credible interval, PIT, calibration or
+shelf life produced by 1.3.x for a model carrying an autocorrelation term
+should be recomputed rather than trusted.** Models without such a term are
+affected only at the level of Monte Carlo error.
 
-## 1.3.1 — three defects in the horizon-reporting rules
+## 1.4.1 — a prediction was not reproducible, and a plot axis was mislabelled
 
-All three have the same shape: a noisy quantity promoted to a confident-looking
-number.
+* **`et_predict()` drew from the ambient random stream.** The
+  posterior-predictive draw and the driver perturbation both consume R's RNG
+  and nothing seeded them: `et_fit(seed =)` reached Stan and stopped there. Two
+  runs of the same fit on the same new data therefore differed, and by how much
+  depended on what had used the stream earlier in the session. In this
+  package's own case studies, two scripts that fit the same model to the same
+  training window disagreed about one series' forecast by a full lead, because
+  one reached `et_predict()` after a single fit and the other after several.
+  `et_predict()` now takes `seed`, defaulting to the seed the model was fitted
+  with, so a prediction is reproducible from the model alone; `seed = NA` keeps
+  the ambient stream. The caller's stream is saved and restored, so seeding
+  here never reruns anyone else's draws.
 
-* **The first threshold exceedance was reported as the horizon.** When the
-  CI-width / response-scale ratio hovers near the threshold without trending, a
-  single period exceeds it by chance. On a real 16-period series whose ratio sat
-  at ~0.92 throughout with exactly one excursion to 1.038, that excursion was
-  reported as a 12-period horizon. It was not reproducible: holding data, seed
-  and priors fixed and varying only sampler settings moved the answer between
-  "no crossing", a projection far outside the window, and two different crossing
-  periods. `shelf_life()` now requires `min_run` consecutive uninformative
-  periods (default 2). A crossing in force at the first lead is still detected,
-  and a dip inside an otherwise degrading series no longer resets the horizon.
+* **`et_plot_decomposition(group_col = )` plotted a sum of shares on an axis
+  labelled as a share.** Each component was divided by its own row's
+  `total_var` and the rows were then stacked at one x position per group, so a
+  group with `H` observations produced a bar of height `H`. The colour
+  proportions were unaffected — the picture was right and the axis was not.
+  Rows are now aggregated before normalising, which also makes the bar equal
+  the variance-weighted share that the package's own summaries report.
 
-* **The projection mode extrapolated slopes indistinguishable from flat.**
-  `min_slope_for_projection` is a magnitude gate only, so a slope of ~1e-3 with
-  a one-sided p-value of 0.42 cleared it and was extrapolated. On the same
-  series this produced a projected crossing 45 years out whose delta-method 95%
-  interval spanned 328 years and included the past. The projection now
-  additionally requires the slope to be significantly positive
-  (`projection_alpha`, default 0.05); when it is not, the result is a lower
-  bound, which is the honest answer for a forecast whose precision does not
-  degrade in-window.
+* **`et_plot_shelf_life()`** gained `max_ratio`, applied through
+  `coord_cartesian()` so it zooms rather than filters, and its threshold label
+  is now placed by clearance rather than pinned to the panel's left edge.
 
-* **`et_skill_score()` had the same first-crossing defect.** Its null-relative
-  forecast limit was the first lead time with non-positive CRPS skill, with no
-  persistence requirement. Skill hovering near zero crosses by chance, so one
-  unlucky lead was reported as the limit — observed on a real comparison whose
-  mean skill across the window was +0.49 but whose reported limit fell at the
-  seventh lead. `et_skill_score()` now takes the same `min_run` (default 2), and
-  the returned `"forecast_limit"` attribute carries `n_below`, `first_below` and
-  `min_run` so isolated dips are visible rather than load-bearing. On the
-  package author's own case studies this moved five of ten reported limits while
-  leaving every mean skill unchanged, which is the expected signature of a
-  defect in the summary rule rather than in the score.
+## 1.4.0 — three defects in the predictive draws
 
-Every horizon and forecast limit now carries the diagnostics needed to see an
-isolated excursion for what it is: `shelf_life()` returns `n_exceedances`,
-`frac_exceedance`, `first_exceedance`, `min_run`, and `slope`/`slope_p` in trend
-mode; `et_skill_score()` returns `n_below`, `first_below` and `min_run`.
+* **The predictor perturbation was recycled across posterior draws.**
+  `et_predict()` perturbed only the first `n_perturb` draws and the inflation
+  step then recycled that block across all `n_draws` rows, pairing the
+  perturbed mean of one draw with the predictive residual of another. That
+  destroys `Cov(mu, y - mu)`, which is approximately zero for an iid fit but
+  substantially negative for an `ar()` fit, so the predictive variance was
+  biased upward. On an annual ecological series the gap between predictive and
+  posterior-predictive variance, which should equal `env_var`, came out at 20x,
+  22x and 196x `env_var` for the three most persistent cases. Because those
+  draws are the single source of truth for the credible interval, PIT,
+  calibration *and* shelf life, the inflation reached all four: 90% intervals
+  were 1-12% too wide. `n_perturb` now defaults to `n_draws`.
 
-New regression tests in `tests/testthat/test-shelf-life-sustained.R` and
-`tests/testthat/test-skill.R` pin both defects — the first using the real
-trajectory that exposed it — and assert that `min_run = 1` and
-`projection_alpha = 1` reproduce the previous behaviour exactly.
+* **`binomial()` with `trials(n > 1)` decomposed on the probability scale while
+  the predictive draws were counts.** With `n = 10`, `residual_var` came back
+  ten times too small and `param_var` a hundred times too small, and the
+  env-inflated draws added a probability to a count residual, landing outside
+  the support. The predictive variance was effectively flat in the perturbation
+  SD, so driver uncertainty was barely propagated at all.
 
-## 1.3.1 — new functionality
+* **The env-inclusive predictive draw was always a location shift.** It is now
+  drawn from the response distribution at the perturbed mean, which coincides
+  with the old construction under a Gaussian identity link and otherwise
+  returns values on the family's own support. Models carrying a residual
+  autocorrelation term keep the location shift deliberately, since the
+  deviation is what carries the accumulation forward; the returned object
+  records which construction was used.
 
-Two new exported functions, both closing gaps identified in peer review:
+## 1.4.0 — changes to the decomposition
 
-* **`et_shelf_life_pool()`** pools forecast horizons across repeated forecast
-  origins. Origins where the forecast was still informative when the data ran
-  out are treated as right-censored rather than discarded — discarding them
-  biases the pooled horizon downward, since those are exactly the long horizons.
-  Estimation uses Kaplan–Meier via **survival** (a Recommended package, declared
-  in `Suggests`), with a documented fallback when it is unavailable.
-
-* **`et_priors_split()`** fits the first-stage regularized model on a subset and
-  returns the disjoint complement for the Bayesian fit, so variable selection
-  and the likelihood share no observations.
-
-* **Hierarchical models** are now decomposed correctly, distinguishing
-  prediction for a known group (the group effect is an estimated parameter; no
-  extra variance channel) from prediction for a new level (the budget integrates
-  over the group-level distribution and gains a `group_var` channel carrying the
-  between-group variance).
-
-The test suite grew from 475 to 572 tests, including numerical validation of the
-decomposition for Poisson, negative-binomial and Bernoulli families against
-independently simulated targets — previously only the Gaussian-identity case was
-verified numerically.
-
-## 1.3.0 — variance decomposition under autocorrelation
-
-`decompose_uncertainty()` returned incorrect components for any model carrying a
-residual autocorrelation term. It computed the environmental component as
-`Var(perturbed linear predictor) - Var(unperturbed linear predictor)`. The first
-array was built internally and carried no autocorrelation term; the second came
-from `brms::posterior_linpred()`, which under brms's default `ar(cov = FALSE)`
-parameterisation *does* include the autocorrelation contribution to the mean.
-The subtraction therefore evaluated `V_env - V_AR`, which turns negative as the
-AR error grows and was clamped to zero by a `pmax(., 0)` guard intended only for
-Monte Carlo jitter.
-
-The defect was invisible on inspection — the source comment asserted that "the
-mean structure carries no autocorrelation" — and was found by testing against a
-closed-form target. In a controlled AR(1) fit (phi = 0.9) whose analytic
-environmental variance is 0.152, the reported `env_var` averaged 0.012 and was
-floored to exactly zero at 13 of 15 lead times; the iid control recovered 0.173
-correctly.
-
-Fixes: both `posterior_linpred()` calls now pass `incl_autocor = FALSE` (verified
-bit-identical to the internal predictor, so the AR term cancels exactly);
-`var_trim` applies one variance estimator to every channel; `ar_prior` replaces
-brms's flat unbounded AR prior with `normal(0, 0.5)` and warns near the unit
-root; and the zero-floor is instrumented to warn when it fires more
-systematically than jitter explains. Models without an autocorrelation term are
-unaffected — these are provably no-ops in that case.
+* **`total_var` is measured, not defined**: it is `Var[posterior_predict]`, the
+  spread of the distribution the reported interval is drawn from. A budget
+  whose total is defined as the sum of its parts cannot report when the parts
+  fail to account for it.
+* **`temporal_var` is signed.** It is a covariance term, and a negative value
+  is meaningful, since autocorrelated errors can reduce predictive variance
+  relative to an independent-innovation baseline.
+* **New `closure_gap` column for iid models**, reporting the shortfall rather
+  than folding it into a channel, with `v_env_mcse` alongside `env_var` so the
+  zero-floor on that channel warns when it fires beyond twice its Monte Carlo
+  error.
 
 ## Test environments
 
@@ -133,33 +100,19 @@ unaffected — these are provably no-ops in that case.
 issue. If it is too soon after the previous version, I am happy to wait and
 resubmit; please tell me the preferred interval.
 
-**Note 2 — slow examples.** The expected note for a Stan-backed package:
-
-```
-* checking examples ... NOTE
-Examples with CPU (user + system) or elapsed time > 5s
-                        user system elapsed
-decompose_uncertainty 52.230  2.827  55.159
-et_calibrate          48.642  2.480  51.241
-shelf_life            48.499  2.469  51.094
-et_priors_split       47.540  2.533  50.203
-et_fit                47.280  2.480  49.849
-```
-
-These five examples each fit one Bayesian model, so almost all of that time is
-Stan model **compilation** rather than computation. The examples are already
-minimal — 20 observations, one predictor, a single chain of 500 iterations, of
-which sampling accounts for under a second — so the cost is not reducible by
-shrinking them further. They are wrapped in `\donttest{}`.
-
-This note was present in the previously accepted 1.2.x releases. To be precise
-about what changed: the list has grown from four entries to five, because this
-release adds `et_priors_split()`, whose example necessarily fits a model to show
-the split workflow. No pre-existing example has been enlarged.
+**Note 2 — slow examples.** The expected note for a Stan-backed package: five
+examples each fit one Bayesian model, so almost all of that time is Stan model
+**compilation** rather than computation. The examples are already minimal — 20
+observations, one predictor, a single chain of 500 iterations, of which
+sampling accounts for under a second — so the cost is not reducible by
+shrinking them further. They are wrapped in `\donttest{}`. This note was
+present in the previously accepted releases.
 
 For context on total check time: the `testthat` suite is gated with
-`skip_on_cran()`, so it runs in about 4 seconds under CRAN's settings (572 tests
-locally with `NOT_CRAN=true`). Vignettes do not fit models at build time.
+`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (671
+tests across 21 files locally with `NOT_CRAN=true`, 0 failures, 0 skips; the
+suite grew from 572 at 1.3.1 as each defect below was pinned by a regression
+test). Vignettes do not fit models at build time.
 
 ## Reverse dependencies
 

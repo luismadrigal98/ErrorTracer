@@ -1,8 +1,29 @@
 # ErrorTracer 1.4.1
 
-Corrects plotting functions and axis for the predictive variance shares.
+Corrects plotting functions and axis for the predictive variance shares, and
+seeds the prediction draws. **A prediction made before this release is not
+reproducible**: `et_predict()` drew from the ambient random stream, so the
+intervals, PIT, calibration and shelf life it produced depended on what had
+used that stream earlier in the session.
 
 ## Bug fixes
+
+* **`et_predict()` drew from the ambient random stream, so a prediction was
+  not reproducible.** The posterior-predictive draw and the driver
+  perturbation both consume the R RNG, and nothing seeded them: `et_fit(seed =)`
+  reached Stan and stopped there. Two runs of the same fit on the same newdata
+  therefore differed, and by how much depended on whatever had used the stream
+  earlier in the session. In this package's own case studies, a single-origin
+  script and a rolling-origin script that fit the same model to the same
+  training window disagreed about one species' forecast by a full lead, because
+  one reached `et_predict()` after a single fit and the other after several.
+
+  `et_predict()` now takes `seed`, defaulting to the seed the model was fitted
+  with, so a prediction is reproducible from the model alone; `seed = NA` keeps
+  the ambient stream for a caller managing it. The caller's stream is saved and
+  restored, so seeding here never reruns anyone else's draws. For an
+  `et_model_list` the seed is offset by group position, so groups do not share
+  a perturbation stream.
 
 * **`et_plot_decomposition(group_col = )` drew a sum of shares on an axis
   labelled as a share.** Each component was divided by that row's `total_var`

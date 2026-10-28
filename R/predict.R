@@ -200,6 +200,16 @@
 #'   than fixing it, and leaves the budget describing a different distribution
 #'   from the interval.  Prefer a stationarity-respecting prior at fit time
 #'   (\code{\link{et_fit}(ar_prior = "stationary")}).
+#' @param seed Integer or \code{NULL} (default).  Seed for the random draws
+#'   this function makes: the posterior-predictive draw and the driver
+#'   perturbation of \code{env_noise} / \code{env_ensemble}.  \code{NULL}
+#'   takes the seed the model was fitted with (\code{model$config$seed}), so a
+#'   prediction is reproducible from the model alone and two scripts that reach
+#'   the same fit by different routes agree.  The caller's random stream is
+#'   saved and restored, so seeding here never disturbs anything downstream.
+#'   Pass \code{NA} to keep the ambient stream and leave the draws free.
+#'   For an \code{et_model_list} the seed is offset by group position, so the
+#'   groups neither share a perturbation stream nor stop being reproducible.
 #' @param ... Passed to methods.
 #'
 #' @return An \code{et_prediction} object (list) containing:
@@ -243,8 +253,23 @@ et_predict <- function(model, newdata, env_noise = NULL, env_cov = NULL,
                         n_perturb = NULL,
                         n_env_draws = 1L,
                         interval_type = c("predictive", "linpred"),
-                        include_env_in_ci = NULL, var_trim = 0, ...) {
+                        include_env_in_ci = NULL, var_trim = 0,
+                        seed = NULL, ...) {
   UseMethod("et_predict")
+}
+
+# ______________________________________________________________________________
+# Which seed the prediction draws should use.
+#
+# NULL  -> the seed the model was fitted with, so a prediction is reproducible
+#          from the model alone.
+# NA    -> none: keep the ambient stream, for a caller who is managing it.
+# value -> that one.
+.resolve_pred_seed <- function(seed, model) {
+  if (length(seed) == 1L && is.na(seed)) return(NULL)
+  if (is.null(seed)) seed <- model$config$seed
+  if (is.null(seed) || length(seed) != 1L || is.na(seed)) return(NULL)
+  as.integer(seed)
 }
 
 # ******************************************************************************
@@ -263,7 +288,28 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
                                   interval_type = c("predictive", "linpred"),
                                   include_env_in_ci = NULL,
                                   var_trim = 0,
+                                  seed = NULL,
                                   ...) {
+
+  # Prediction draws from the R RNG: the posterior-predictive draw and the
+  # driver perturbation both do. Left unseeded, two runs of the same fit on
+  # the same newdata differ, and whether they do depends on whatever consumed
+  # the stream earlier in the session -- so a script that fits one model and a
+  # script that fits twenty disagree about the same origin. The fit's own seed
+  # is the default, which makes a prediction reproducible from the model alone;
+  # the caller's stream is restored on exit so seeding here never moves it.
+  seed <- .resolve_pred_seed(seed, model)
+  if (!is.null(seed)) {
+    if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      .et_old_seed <- get(".Random.seed", envir = globalenv())
+      on.exit(assign(".Random.seed", .et_old_seed, envir = globalenv()),
+              add = TRUE)
+    } else {
+      on.exit(suppressWarnings(rm(".Random.seed", envir = globalenv())),
+              add = TRUE)
+    }
+    set.seed(as.integer(seed))
+  }
 
   interval_type <- match.arg(interval_type)
   if (!is.numeric(var_trim) || length(var_trim) != 1L ||
@@ -671,8 +717,21 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
                                       interval_type = c("predictive", "linpred"),
                                       include_env_in_ci = NULL,
                                       var_trim = 0,
+                                      seed = NULL,
                                       ...) {
   interval_type <- match.arg(interval_type)
+
+  # Every group would otherwise start its perturbation from the same seed,
+  # since a grouped fit hands each model the same one. Offsetting by position
+  # keeps the groups independent and still reproducible.
+  seed_base <- seed
+  if (is.null(seed_base)) {
+    cfgs <- vapply(model$models,
+                   function(m) if (is.null(m$config$seed)) NA_real_
+                               else as.numeric(m$config$seed), numeric(1))
+    cfgs <- cfgs[!is.na(cfgs)]
+    if (length(cfgs)) seed_base <- cfgs[[1L]]
+  }
 
   grouping <- model$grouping
   if (!grouping %in% colnames(newdata)) {
@@ -698,6 +757,8 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
     preds[[g]] <- tryCatch(
       et_predict.et_model(
         model             = m,
+        seed              = if (is.null(seed_base)) NULL
+                            else as.integer(seed_base) + match(g, groups) - 1L,
         newdata           = sub_nd,
         env_noise         = env_noise,
         env_cov           = env_cov,

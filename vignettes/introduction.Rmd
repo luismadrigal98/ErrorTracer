@@ -496,8 +496,11 @@ variance — identifying additional drivers of allele-frequency change.
 
 > **Autocorrelation note.** If you fit the model with a residual
 > autocorrelation term (e.g.\ `et_fit(y ~ x + ar(time = t, p = 1), ...)`),
-> `decompose_uncertainty()` adds a fourth column `temporal_var` defined as
-> `pmax(0, total_var − (param_var + env_var + residual_var))`. It captures
+> `decompose_uncertainty()` adds a fourth column `temporal_var`, the remainder
+> `total_var − (param_var + env_var + residual_var)`. Since 1.4.0 it is
+> **signed**: it is a covariance term, and a negative value is meaningful,
+> since autocorrelated errors can reduce predictive variance relative to an
+> independent-innovation baseline. It captures
 > the autocorrelation-induced spread that `brms::posterior_predict()`
 > accumulates iteratively beyond a single innovation, and `residual_var`
 > is then interpretable as the *innovation* variance rather than the

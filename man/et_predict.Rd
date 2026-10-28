@@ -18,6 +18,7 @@ et_predict(
   interval_type = c("predictive", "linpred"),
   include_env_in_ci = NULL,
   var_trim = 0,
+  seed = NULL,
   ...
 )
 }
@@ -222,6 +223,17 @@ since \code{total_var} is always the variance of the env-inclusive draws.}
   than fixing it, and leaves the budget describing a different distribution
   from the interval.  Prefer a stationarity-respecting prior at fit time
   (\code{\link{et_fit}(ar_prior = "stationary")}).}
+
+\item{seed}{Integer or \code{NULL} (default).  Seed for the random draws
+this function makes: the posterior-predictive draw and the driver
+perturbation of \code{env_noise} / \code{env_ensemble}.  \code{NULL}
+takes the seed the model was fitted with (\code{model$config$seed}), so a
+prediction is reproducible from the model alone and two scripts that reach
+the same fit by different routes agree.  The caller's random stream is
+saved and restored, so seeding here never disturbs anything downstream.
+Pass \code{NA} to keep the ambient stream and leave the draws free.
+For an \code{et_model_list} the seed is offset by group position, so the
+groups neither share a perturbation stream nor stop being reproducible.}
 
 \item{...}{Passed to methods.}
 }
