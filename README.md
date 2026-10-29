@@ -151,6 +151,34 @@ print(fit_list)
 #   Fitted   : 12 / 12
 ```
 
+#### Bringing your own fit
+
+Steps 1 and 2 are optional. A model you fitted yourself with `brms` runs
+through the rest of the pipeline unchanged — `et_predict()` and `et_diagnose()`
+accept a `brmsfit` directly, and `as_et_model()` gives you the `et_model`
+object if you want it:
+
+```r
+my_fit <- brms::brm(z_diff ~ Tmean + PPT, data = train_df)
+
+pred <- et_predict(my_fit, newdata = forecast_df,
+                   env_noise = list(Tmean = 0.5, PPT = 0.1))
+
+# Or wrap it explicitly, e.g. to attach a prior spec for the
+# prior-vs-posterior plots, or to supply training data the formula did not use:
+model <- as_et_model(my_fit, prior_spec = prior_spec)
+```
+
+The formula, family, training data and sampling seed are read off the fit, so a
+prediction from a wrapped model is as reproducible as one from `et_fit()`.
+
+Posterior draws on their own are not enough: a bare `stanfit` or `CmdStanMCMC`
+records nothing about which parameters are coefficients, what the link function
+is, or which rows a forecast continues. To bring draws from a hand-written Stan
+program in, give `brms` the formula, family and data once with
+`brm(..., empty = TRUE)` and attach the draws to the result — the error message
+spells out the four lines.
+
 ---
 
 ### Step 3 — Predict with uncertainty propagation

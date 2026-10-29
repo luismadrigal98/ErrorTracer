@@ -790,6 +790,15 @@ et_predict.et_model_list <- function(model, newdata, env_noise = NULL,
   )
 }
 
+# A fit made outside the package enters here. as_et_model() recovers the
+# formula, family, data and sampling seed from it, so the prediction, the
+# decomposition and everything downstream behave as they do for et_fit().
+#' @rdname as_et_model
+#' @export
+et_predict.brmsfit <- function(model, newdata, ...) {
+  et_predict(as_et_model(model), newdata = newdata, ...)
+}
+
 # ******************************************************************************
 # Internal helpers
 # ______________________________________________________________________________

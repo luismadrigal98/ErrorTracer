@@ -1,3 +1,37 @@
+# ErrorTracer 1.4.2
+
+Lets a model fitted outside the package enter the pipeline. Stages 1 and 2 are
+now optional in fact as well as in principle: prior extraction is a convenience
+for workflows that begin with a penalized fit, not a precondition for the
+variance accounting that follows it.
+
+## New features
+
+* **`as_et_model()` wraps an existing `brms` fit** in the `et_model` structure
+  `et_fit()` returns, so a model fitted by hand, by a colleague, or in an
+  earlier script runs through `et_predict()`, `decompose_uncertainty()`,
+  `shelf_life()` and the calibration diagnostics without being refitted. The
+  formula, family, training data and sampling seed are all recovered from the
+  fit, so a prediction from a wrapped model reproduces in the same way one from
+  `et_fit()` does.
+* **`et_predict()` and `et_diagnose()` accept a `brmsfit` directly** and call
+  `as_et_model()` themselves. Both previously raised "no applicable method":
+  the generics dispatched on `et_model` and `et_model_list` only.
+* **A bare `stanfit`, `stanmodel` or `CmdStanMCMC` is refused with the route to
+  take instead.** Posterior draws alone do not record which parameters are
+  coefficients, what the link function is, or which rows a forecast continues,
+  so the error points at `brms::brm(empty = TRUE)`, which builds the
+  scaffolding around a formula, family and data set that external draws can be
+  attached to.
+
+## Bug fixes
+
+* **`%||%` was used but never defined or imported.** `R/fit.R` and
+  `R/predict.R` call it, and it resolved only on R >= 4.4.0, where base R
+  supplies it; on the R (>= 4.1.0) that `DESCRIPTION` declares those calls
+  would have failed with "could not find function". It is now defined in
+  `R/utils.R`.
+
 # ErrorTracer 1.4.1
 
 Corrects plotting functions and axis for the predictive variance shares, and

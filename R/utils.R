@@ -24,6 +24,14 @@ NULL
 .et_error <- function(...) .et_log(..., level = "ERROR")
 
 # ============================================================
+# Null-coalescing operator
+# ============================================================
+# base R gained %||% in 4.4.0, but DESCRIPTION declares R (>= 4.1.0) and the
+# operator is used throughout fit.R and predict.R, so define it here rather
+# than inherit it from whichever R the user happens to run.
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+# ============================================================
 # Numeric helpers
 # ============================================================
 

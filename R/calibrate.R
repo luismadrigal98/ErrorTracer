@@ -286,6 +286,14 @@ et_diagnose.et_model_list <- function(model, loo = TRUE, ...) {
   list(per_group = diag_list, summary = summary_df)
 }
 
+# Sampler diagnostics need only the fit itself, so a brmsfit is passed straight
+# through rather than wrapped.
+#' @rdname as_et_model
+#' @export
+et_diagnose.brmsfit <- function(model, loo = TRUE, ...) {
+  .diagnose_single(model, loo = loo)
+}
+
 .diagnose_single <- function(fit, loo) {
   rhat_vals  <- brms::rhat(fit)
   neff_vals  <- brms::neff_ratio(fit)

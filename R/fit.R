@@ -473,6 +473,160 @@ et_fit <- function(formula,
 }
 
 # ******************************************************************************
+# Bringing in a model fitted elsewhere
+# ______________________________________________________________________________
+
+# Seed the fit was sampled with, so a prediction from a wrapped fit reproduces
+# by default exactly as one from et_fit() does. rstan keeps it in the stanfit's
+# stan_args, cmdstanr in the CmdStanMCMC metadata; neither is guaranteed to be
+# there, and NULL simply means et_predict() needs a seed of its own.
+.brmsfit_seed <- function(fit) {
+  s <- tryCatch(fit$fit@stan_args[[1L]]$seed, error = function(e) NULL)
+  if (is.null(s)) {
+    s <- tryCatch(fit$fit$metadata()$seed, error = function(e) NULL)
+  }
+  if (is.null(s) || !length(s) || is.na(s[1L])) return(NULL)
+  as.integer(s[1L])
+}
+
+# Sampler settings for print()/summary(). et_fit() records what the caller
+# asked for, where iter is the total including warmup, so read stan_args first
+# and fall back to the post-warmup count brms reports.
+.brmsfit_config <- function(fit, seed) {
+  sa <- tryCatch(fit$fit@stan_args[[1L]], error = function(e) NULL)
+  list(
+    chains = tryCatch(brms::nchains(fit), error = function(e) NULL),
+    iter   = sa$iter %||%
+      tryCatch(brms::niterations(fit), error = function(e) NULL),
+    warmup = sa$warmup,
+    cores  = NULL,
+    seed   = seed,
+    adapt_delta   = sa$control$adapt_delta,
+    max_treedepth = sa$control$max_treedepth
+  )
+}
+
+#' Use a model fitted outside ErrorTracer
+#'
+#' Wraps an existing \code{brms} fit in the \code{et_model} structure that
+#' \code{\link{et_fit}} returns, so a model fitted elsewhere --- by hand, by a
+#' colleague, or in an earlier script --- is carried through
+#' \code{\link{et_predict}}, \code{\link{decompose_uncertainty}},
+#' \code{\link{shelf_life}} and the calibration diagnostics without being
+#' refitted. Stages 1 and 2 of the pipeline are therefore optional: the
+#' prior-extraction step is a convenience for workflows that begin with a
+#' penalized fit, not a requirement for the accounting that follows it.
+#'
+#' \code{et_predict()} and \code{et_diagnose()} accept a \code{brmsfit}
+#' directly and call this function themselves, so the wrapper is only needed
+#' when you want the \code{et_model} object itself --- to inspect it, to attach
+#' a prior specification, or to override the training data.
+#'
+#' @section What the pipeline reads off the fit:
+#' Four things: the posterior draws; the response family, for the variance
+#' function of the residual channel; the model formula, to find the response
+#' column and to detect an \code{ar()}-family term; and the training data, to
+#' continue an autocorrelated series forward and to set the default
+#' \code{response_scale} in \code{\link{shelf_life}}. A \code{brmsfit} carries
+#' all four.
+#'
+#' A bare \code{stanfit} or \code{CmdStanMCMC} carries none of them, and is
+#' rejected with a pointer to \code{brms::brm(empty = TRUE)}, which is the
+#' supported route for draws from a hand-written Stan program: it builds the
+#' \code{brmsfit} scaffolding around a formula, family and data set, and the
+#' external draws are attached to it.
+#'
+#' @param fit A fitted \code{brmsfit}.
+#' @param data Training data. Defaults to the model frame stored on the fit
+#'   (\code{fit$data}), which carries every column the formula used and is what
+#'   the later stages need; supply the original data frame when a later stage
+#'   must see a column the formula did not.
+#' @param prior_spec Optional \code{et_prior_spec} from
+#'   \code{\link{extract_priors}}, when the fit was given informed priors. Only
+#'   the prior-versus-posterior plots read it; anything else is ignored.
+#' @param seed Integer seed recorded on the model and used as the default for
+#'   \code{et_predict()}. Defaults to the seed the fit was sampled with, when
+#'   that can be recovered from the back end, and is otherwise \code{NULL},
+#'   which leaves predictions drawing from the ambient stream unless
+#'   \code{et_predict(seed = )} supplies one.
+#' @return An \code{et_model} object, identical in structure to what
+#'   \code{\link{et_fit}} returns.
+#' @examples
+#' \donttest{
+#' set.seed(1)
+#' d   <- data.frame(y = rnorm(30), x = rnorm(30))
+#' fit <- brms::brm(y ~ x, data = d, chains = 1, iter = 500, refresh = 0)
+#' m    <- as_et_model(fit)
+#' pred <- et_predict(m, newdata = d[1:5, ], env_noise = list(x = 0.1))
+#'
+#' # Equivalently, straight from the fit:
+#' pred <- et_predict(fit, newdata = d[1:5, ], env_noise = list(x = 0.1))
+#' }
+#' @export
+as_et_model <- function(fit, data = NULL, prior_spec = NULL, seed = NULL) {
+
+  if (inherits(fit, c("stanfit", "stanmodel", "CmdStanMCMC", "CmdStanFit"))) {
+    stop(
+      "ErrorTracer needs the formula, family and training data alongside the ",
+      "posterior draws, and a <", class(fit)[1L], "> carries none of them: ",
+      "nothing in it records which parameters are coefficients, what the link ",
+      "function is, or which rows a forecast continues.\n",
+      "Give brms that information once and attach the draws to the result:\n",
+      "  skel <- brms::brm(y ~ x, data = train, family = gaussian(), ",
+      "empty = TRUE)\n",
+      "  skel$fit <- your_stanfit   # parameter names must follow brms' own\n",
+      "  skel <- brms::rename_pars(skel)\n",
+      "  et_predict(skel, newdata = newdata)\n",
+      "See the 'empty' argument of brms::brm().",
+      call. = FALSE
+    )
+  }
+  if (!inherits(fit, "brmsfit")) {
+    stop("as_et_model() needs a brmsfit; got <", class(fit)[1L], ">.",
+         call. = FALSE)
+  }
+
+  # The decomposition splits the variance of one response. A multivariate fit
+  # has several, with no single family or residual scale to evaluate.
+  if (inherits(fit$formula, "mvbrmsformula")) {
+    stop("Multivariate brms models are not supported: the variance ",
+         "decomposition is defined for a single response.", call. = FALSE)
+  }
+
+  # Keep the plain formula, not the brmsformula wrapped around it:
+  # stats::update(<brmsformula>, . ~ 0) returns nothing usable, and that is how
+  # et_calibrate() finds the response column.
+  form <- fit$formula
+  if (inherits(form, "brmsformula")) form <- form$formula
+  if (!inherits(form, "formula")) {
+    stop("Could not recover a model formula from the fit; it is needed to ",
+         "identify the response and any autocorrelation term.", call. = FALSE)
+  }
+
+  if (is.null(data)) data <- tryCatch(fit$data, error = function(e) NULL)
+  if (!is.data.frame(data) || !nrow(data)) {
+    stop("The fit carries no training data, so an autocorrelated series ",
+         "cannot be continued and shelf_life() has no default response ",
+         "range. Supply data = <the data the model was fitted on>.",
+         call. = FALSE)
+  }
+
+  if (is.null(seed)) seed <- .brmsfit_seed(fit)
+
+  structure(
+    list(
+      fit = fit,
+      prior_spec = if (inherits(prior_spec, "et_prior_spec")) prior_spec
+                   else NULL,
+      formula = form,
+      data = data,
+      config = .brmsfit_config(fit, seed)
+    ),
+    class = "et_model"
+  )
+}
+
+# ******************************************************************************
 # S3 methods for et_model
 # ______________________________________________________________________________
 
