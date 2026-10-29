@@ -1,8 +1,9 @@
 ## Summary
 
-This is a bug-fix release (1.4.1). The version on CRAN is 1.3.1, so this
-submission carries the 1.4.0 material as well; 1.4.0 was prepared but never
-submitted. The 1.4.1 fixes come first, then 1.4.0.
+This release (1.4.2) adds one feature and fixes a portability bug. The version
+on CRAN is 1.3.1, so this submission carries the 1.4.1 and 1.4.0 material as
+well; neither was submitted. The 1.4.2 changes come first, then 1.4.1, then
+1.4.0.
 
 **Please note two changes in default output and one in reproducibility.**
 `decompose_uncertainty()` now reports `total_var` as the *measured* posterior
@@ -13,6 +14,21 @@ conservative: **any variance budget, credible interval, PIT, calibration or
 shelf life produced by 1.3.x for a model carrying an autocorrelation term
 should be recomputed rather than trusted.** Models without such a term are
 affected only at the level of Monte Carlo error.
+
+## 1.4.2 — a model fitted outside the package can now be used
+
+`as_et_model()` wraps an existing `brms` fit in the object `et_fit()` returns,
+and `et_predict()` / `et_diagnose()` accept a `brmsfit` directly, so the
+prior-extraction and fitting stages are optional rather than a precondition for
+the variance accounting. Bare Stan objects are refused with the
+`brm(..., empty = TRUE)` route to take instead, since posterior draws alone
+carry neither the family, the formula, nor the training data the decomposition
+reads.
+
+One portability fix: `%||%` was used in `R/fit.R` and `R/predict.R` but never
+defined or imported, so those calls resolved only on R >= 4.4.0, where base R
+supplies it. `DESCRIPTION` declares R (>= 4.1.0), so the package would have
+failed on the oldrel CRAN checks. It is now defined in `R/utils.R`.
 
 ## 1.4.1 — a prediction was not reproducible, and a plot axis was mislabelled
 
@@ -109,8 +125,8 @@ shrinking them further. They are wrapped in `\donttest{}`. This note was
 present in the previously accepted releases.
 
 For context on total check time: the `testthat` suite is gated with
-`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (671
-tests across 21 files locally with `NOT_CRAN=true`, 0 failures, 0 skips; the
+`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (709
+tests across 22 files locally with `NOT_CRAN=true`, 0 failures, 0 skips; the
 suite grew from 572 at 1.3.1 as each defect below was pinned by a regression
 test). Vignettes do not fit models at build time.
 
