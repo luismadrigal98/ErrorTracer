@@ -25,6 +25,12 @@ the variance accounting. Bare Stan objects are refused with the
 carry neither the family, the formula, nor the training data the decomposition
 reads.
 
+It also fixes a faceting defect in `et_plot_pit()`: the dashed uniform line
+and the 95% consistency band were computed once from the mean group size and
+drawn identically in every panel, so panels of unequal size were judged against
+a reference that belonged to neither. Each panel now gets its own. No returned
+value changes; the affected output is the plot.
+
 One portability fix: `%||%` was used in `R/fit.R` and `R/predict.R` but never
 defined or imported, so those calls resolved only on R >= 4.4.0, where base R
 supplies it. `DESCRIPTION` declares R (>= 4.1.0), so the package would have

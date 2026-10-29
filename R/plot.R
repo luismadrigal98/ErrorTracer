@@ -672,7 +672,10 @@ et_plot_sensitivity <- function(sens, show = c("horizon", "env_share", "ratio"))
 #' indicate calibration; a \strong{U-shape} means overconfident (too-narrow)
 #' intervals, a central \strong{hump} means underconfident (too-wide), and a
 #' \strong{tilt} means bias.  The shaded band is an approximate 95\% consistency
-#' region for the bar heights under uniformity.
+#' region for the bar heights under uniformity.  When \code{pit} carries a
+#' \code{group} column the reference line and band are computed separately for
+#' each panel, so panels holding different numbers of observations remain
+#' comparable.
 #'
 #' @param pit A \code{data.frame} from \code{\link{et_pit}} (a \code{pit} column,
 #'   optionally \code{group}), or a bare numeric vector of PIT values.
@@ -690,20 +693,40 @@ et_plot_pit <- function(pit, bins = 10L) {
   has_group <- "group" %in% colnames(df)
   breaks    <- seq(0, 1, length.out = bins + 1L)
 
-  # Expected bar height and an approximate 95% band under uniformity.
-  n_per    <- if (has_group) as.numeric(tapply(!is.na(df$pit), df$group, sum))
-              else sum(!is.na(df$pit))
-  expected <- mean(n_per) / bins
-  band     <- 1.96 * sqrt(expected * (1 - 1 / bins))
+  # Expected bar height and an approximate 95% band under uniformity, one per
+  # panel. Groups routinely differ in size -- a 35-year forecast window beside
+  # a 16-year one -- and a single pooled reference lands below the large
+  # panel's bars and above the small panels', so a panel whose every bar
+  # clears the line reads as grossly miscalibrated when a histogram cannot be:
+  # its bars must average to the panel's own n / bins.
+  ref <- function(n) {
+    e <- n / bins
+    b <- 1.96 * sqrt(e * (1 - 1 / bins))
+    data.frame(expected = e, ymin = pmax(0, e - b), ymax = e + b, pit = 0)
+  }
+  if (has_group) {
+    n_per <- tapply(!is.na(df$pit), df$group, sum)
+    n_per <- n_per[!is.na(n_per) & n_per > 0]
+    bands <- ref(as.numeric(n_per))
+    bands$group <- if (is.factor(df$group)) {
+      factor(names(n_per), levels = levels(df$group))
+    } else {
+      names(n_per)
+    }
+  } else {
+    bands <- ref(sum(!is.na(df$pit)))
+  }
 
   p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[["pit"]])) +
-    ggplot2::annotate("rect", xmin = 0, xmax = 1,
-                      ymin = max(0, expected - band), ymax = expected + band,
-                      fill = "grey80", alpha = 0.5) +
+    ggplot2::geom_rect(data = bands, inherit.aes = FALSE,
+                       ggplot2::aes(ymin = .data[["ymin"]],
+                                    ymax = .data[["ymax"]]),
+                       xmin = 0, xmax = 1, fill = "grey80", alpha = 0.5) +
     ggplot2::geom_histogram(breaks = breaks, boundary = 0,
                             fill = "steelblue", color = "white") +
-    ggplot2::geom_hline(yintercept = expected, linetype = "dashed",
-                        color = "grey40") +
+    ggplot2::geom_hline(data = bands, inherit.aes = FALSE,
+                        ggplot2::aes(yintercept = .data[["expected"]]),
+                        linetype = "dashed", color = "grey40") +
     ggplot2::labs(x = "PIT", y = "Count",
                   title = "PIT histogram (calibration)") +
     et_theme()

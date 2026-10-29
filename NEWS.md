@@ -26,6 +26,18 @@ variance accounting that follows it.
 
 ## Bug fixes
 
+* **`et_plot_pit()` drew one pooled reference line across panels of different
+  sizes.** The dashed uniform line and the shaded 95% band were computed from
+  `mean(n_per)/bins` and then drawn identically in every facet, so a panel
+  holding more observations than its neighbours got a line far below where its
+  bars must average. In this package's own case studies a 35-year forecast
+  window faceted beside six windows of 15 or 16 had its line at 2.3 instead of
+  4.4 and its band at [0, 5.1] instead of [0.5, 8.2]: every bar towered over
+  the line and three of eight broke the band, reading as gross miscalibration
+  for a series that does not reject uniformity. A histogram's bars cannot all
+  clear their own reference, since they average to `n/bins` by construction.
+  Each panel now gets its own line and band.
+
 * **`%||%` was used but never defined or imported.** `R/fit.R` and
   `R/predict.R` call it, and it resolved only on R >= 4.4.0, where base R
   supplies it; on the R (>= 4.1.0) that `DESCRIPTION` declares those calls

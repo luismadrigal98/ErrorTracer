@@ -68,3 +68,38 @@ test_that("randomized PIT is ~uniform for a discrete (Poisson) predictive", {
   expect_gt(ks$p.value, 0.01)          # randomized PIT ~ uniform
   expect_true(all(pit_r$pit >= 0 & pit_r$pit <= 1))
 })
+
+test_that("et_plot_pit gives each panel its own uniform reference", {
+  skip_if_not_installed("ggplot2")
+  # Panels of unequal size are the norm: a 35-year forecast window beside a
+  # 16-year one. A pooled reference put the dashed line at mean(n)/bins in
+  # every facet, so the large panel's bars all cleared a line they cannot all
+  # clear -- a histogram's bars must average to its own n / bins.
+  bins <- 8L
+  pit  <- rbind(
+    data.frame(group = "long",  pit = seq(0.01, 0.99, length.out = 35L)),
+    data.frame(group = "short", pit = seq(0.01, 0.99, length.out = 16L))
+  )
+  built <- ggplot2::ggplot_build(et_plot_pit(pit, bins = bins))
+
+  lay <- Filter(function(d) "yintercept" %in% names(d), built$data)
+  expect_length(lay, 1L)
+  expect_equal(sort(lay[[1]]$yintercept), sort(c(35, 16) / bins))
+
+  # The consistency band is per panel too, and the larger panel's is the only
+  # one whose lower edge clears zero.
+  rect <- Filter(function(d) all(c("ymin", "ymax") %in% names(d)) &&
+                   nrow(d) == 2L, built$data)[[1]]
+  expect_equal(sort(round(rect$ymax, 3)), sort(round(
+    c(35, 16) / bins + 1.96 * sqrt(c(35, 16) / bins * (1 - 1 / bins)), 3)))
+  expect_equal(sum(rect$ymin > 0), 1L)
+})
+
+test_that("et_plot_pit keeps a single reference when there are no groups", {
+  skip_if_not_installed("ggplot2")
+  built <- ggplot2::ggplot_build(et_plot_pit(seq(0.01, 0.99, length.out = 40L),
+                                             bins = 10L))
+  lay <- Filter(function(d) "yintercept" %in% names(d), built$data)[[1]]
+  expect_equal(nrow(lay), 1L)
+  expect_equal(lay$yintercept, 4)
+})

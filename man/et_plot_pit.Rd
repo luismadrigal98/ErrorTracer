@@ -21,7 +21,10 @@ Histogram of the probability-integral-transform values from
 indicate calibration; a \strong{U-shape} means overconfident (too-narrow)
 intervals, a central \strong{hump} means underconfident (too-wide), and a
 \strong{tilt} means bias.  The shaded band is an approximate 95\% consistency
-region for the bar heights under uniformity.
+region for the bar heights under uniformity.  When \code{pit} carries a
+\code{group} column the reference line and band are computed separately for
+each panel, so panels holding different numbers of observations remain
+comparable.
 }
 \seealso{
 \code{\link{et_pit}}, \code{\link{et_plot_calibration}}
