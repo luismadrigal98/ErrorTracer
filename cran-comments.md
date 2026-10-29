@@ -131,7 +131,7 @@ shrinking them further. They are wrapped in `\donttest{}`. This note was
 present in the previously accepted releases.
 
 For context on total check time: the `testthat` suite is gated with
-`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (709
+`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (715
 tests across 22 files locally with `NOT_CRAN=true`, 0 failures, 0 skips; the
 suite grew from 572 at 1.3.1 as each defect below was pinned by a regression
 test). Vignettes do not fit models at build time.
