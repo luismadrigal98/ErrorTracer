@@ -184,12 +184,11 @@ et_sim$forecast[et_sim$forecast$cluster_id == "A", ]
 
 ## Visualise the training data
 
-```{r plot-training-data}
+```{r plot-training-data, fig.cap="Simulated allele-frequency change over the training period."}
 ggplot(et_sim$train, aes(x = year, y = z_diff, colour = cluster_id)) +
   geom_line() +
   geom_point(size = 2) +
   labs(
-    title   = "Simulated allele-frequency change (training period)",
     x       = "Year",
     y       = expression(italic(z)[diff]),
     colour  = "Cluster"
@@ -197,7 +196,7 @@ ggplot(et_sim$train, aes(x = year, y = z_diff, colour = cluster_id)) +
   et_theme()
 ```
 
-```{r plot-predictors}
+```{r plot-predictors, fig.cap="Standardised climate predictors over the training and forecast periods."}
 # Climate predictors over the full period — warming trend visible in Tmean
 all_years <- rbind(
   transform(et_sim$train[et_sim$train$cluster_id == "A",
@@ -219,7 +218,6 @@ ggplot(all_long, aes(x = year, y = value,
   geom_point(size = 1.8) +
   facet_wrap(~ predictor, ncol = 3) +
   labs(
-    title  = "Climate predictors: training and forecast periods",
     x      = "Year", y = "Standardised value", colour = "Period"
   ) +
   et_theme()
@@ -273,9 +271,8 @@ PPT = −0.30, SWE = 0.20) because with n = 20 the regularisation cannot
 fully separate the signal from sampling noise.  This shrinkage toward the
 true values will be completed by the Bayesian posterior.
 
-```{r enet-plot}
+```{r enet-plot, fig.cap="Cross-validated elastic net for cluster A."}
 plot(cv_fit_A)
-title("Cross-validated elastic net — Cluster A", line = 2.5)
 ```
 
 ## Step 2 — Extract informed priors
@@ -483,9 +480,8 @@ or more training data.  `param_var` increases slightly in observations 4–5,
 reflecting that those forecast years (2018–2019) are more distant from the
 training period's centroid, where the model is less certain.
 
-```{r plot-decomp}
-et_plot_decomposition(decomp_A, proportional = TRUE) +
-  labs(subtitle = "Cluster A, forecast 2015–2019")
+```{r plot-decomp, fig.cap="Variance decomposition for cluster A over the 2015-2019 forecast window."}
+et_plot_decomposition(decomp_A, proportional = TRUE)
 ```
 
 The proportional view makes it clear that process noise (residual) accounts
@@ -572,9 +568,8 @@ observed window, and likely far beyond.
 > Increase `max_extrapolation_factor` (or set it to `Inf`) to allow longer
 > projections if the biological context supports it.
 
-```{r plot-shelf-life}
-et_plot_shelf_life(sl_A, show_ratio = TRUE) +
-  labs(subtitle = "Cluster A — 90% CI width / training range (arcsin-sqrt scale)")
+```{r plot-shelf-life, fig.cap="Shelf life for cluster A: 90% CI width divided by the training range, on the arcsin-square-root scale."}
+et_plot_shelf_life(sl_A, show_ratio = TRUE)
 ```
 
 ## Step 8 — Calibration assessment
@@ -606,9 +601,8 @@ expected with only 5 validation observations and regularising priors.  Coverage
 estimates based on n = 5 have high sampling variance; the important result is
 that no CI is systematically under-covering.
 
-```{r plot-calibration}
-et_plot_calibration(cal_A) +
-  labs(subtitle = "Cluster A — posterior predictive calibration")
+```{r plot-calibration, fig.cap="Posterior predictive calibration for cluster A."}
+et_plot_calibration(cal_A)
 ```
 
 ---
@@ -617,14 +611,13 @@ et_plot_calibration(cal_A) +
 
 ## Forecast fan chart
 
-```{r plot-forecast}
+```{r plot-forecast, fig.cap="Forecast for cluster A. Shaded ribbons are the 50, 80, 90 and 95% credible intervals."}
 et_plot_forecast(
   predictions  = pred_A,
   observed     = valid_A,
   response_col = "z_diff",
   time_col     = "year"
-) +
-  labs(subtitle = "Cluster A — shaded ribbons: 50%, 80%, 90%, 95% CI")
+)
 ```
 
 Nested credible-interval ribbons (darker = narrower interval) overlay the
@@ -633,9 +626,8 @@ observed values fall within the 95% CI.
 
 ## Prior versus posterior
 
-```{r plot-prior-posterior}
-et_plot_prior_posterior(fit_A, max_preds = 3L) +
-  labs(subtitle = "Cluster A — how 20 observations update the elastic-net prior")
+```{r plot-prior-posterior, fig.cap="How 20 observations update the elastic-net prior, cluster A."}
+et_plot_prior_posterior(fit_A, max_preds = 3L)
 ```
 
 Each panel overlays the prior density (grey, wide) with the posterior density
@@ -646,9 +638,8 @@ with its largest true effect size.
 
 ## Forest plot: Bayesian vs. elastic net
 
-```{r plot-coefficients}
-et_plot_coefficients(fit_A) +
-  labs(subtitle = "Cluster A — Bayesian 95% CI (blue) vs. enet coefficient (red ×)")
+```{r plot-coefficients, fig.cap="Bayesian 95% credible intervals (blue) against the elastic-net coefficients (red crosses), cluster A."}
+et_plot_coefficients(fit_A)
 ```
 
 Red crosses mark the elastic-net estimates used as prior means.  The Bayesian
@@ -824,17 +815,16 @@ horizon or with larger environmental noise inputs, **cluster B would approach
 the uninformative threshold first** — a direct consequence of its higher
 biological process noise.
 
-```{r plot-grouped-shelf-life}
+```{r plot-grouped-shelf-life, fig.cap="Shelf life for both clusters: 90% CI width divided by the plausible range."}
 et_plot_shelf_life(sl_all, show_ratio = TRUE) +
   labs(
-    subtitle = "Both clusters — 90% CI width / plausible range",
     colour   = "Cluster"
   )
 ```
 
 ## Calibration and forecast plots
 
-```{r grouped-calibrate}
+```{r grouped-calibrate, fig.cap="Posterior predictive calibration for both clusters."}
 cal_all <- et_calibrate(
   pred_all,
   observed     = et_sim$validation,
@@ -842,14 +832,12 @@ cal_all <- et_calibrate(
   ci_levels    = c(0.50, 0.80, 0.90, 0.95)
 )
 
-et_plot_calibration(cal_all) +
-  labs(subtitle = "Both clusters — posterior predictive calibration")
+et_plot_calibration(cal_all)
 ```
 
-```{r grouped-coef-plot}
+```{r grouped-coef-plot, fig.cap="Bayesian 95% credible intervals (blue) against the elastic-net coefficients (red crosses), both clusters."}
 # Forest plot for all groups in a single faceted figure
-et_plot_coefficients(fit_all) +
-  labs(subtitle = "Bayesian 95% CI (blue) vs. enet coefficient (red ×)")
+et_plot_coefficients(fit_all)
 ```
 
 ---

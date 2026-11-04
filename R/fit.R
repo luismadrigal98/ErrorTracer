@@ -549,6 +549,14 @@ et_fit <- function(formula,
 #'   that can be recovered from the back end, and is otherwise \code{NULL},
 #'   which leaves predictions drawing from the ambient stream unless
 #'   \code{et_predict(seed = )} supplies one.
+#' @param model A \code{brmsfit}, when \code{et_predict()} or
+#'   \code{et_diagnose()} is called on one directly. It is passed through
+#'   \code{as_et_model()} first.
+#' @param newdata Data frame of covariate values to forecast at, forwarded to
+#'   \code{\link{et_predict}}.
+#' @param loo Logical. Whether \code{\link{et_diagnose}} computes LOO-CV.
+#' @param ... Further arguments forwarded to \code{\link{et_predict}} or
+#'   \code{\link{et_diagnose}}.
 #' @return An \code{et_model} object, identical in structure to what
 #'   \code{\link{et_fit}} returns.
 #' @examples

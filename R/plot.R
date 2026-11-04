@@ -101,7 +101,6 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
     ggplot2::geom_col(position = "stack") +
     ggplot2::scale_fill_manual(values = fill_values, name = "Component") +
     ggplot2::labs(
-      title = "Uncertainty Decomposition",
       x     = if (x_col == "obs_id") "Observation" else x_col,
       y     = if (proportional) "Share of predictive variance" else "Variance"
     ) +
@@ -231,7 +230,6 @@ et_plot_shelf_life <- function(sl, show_ratio = TRUE, max_ratio = NULL) {
     ggplot2::geom_point(size = 2.5) +
     ggplot2::geom_hline(yintercept = hline, linetype = "dashed", color = "grey40") +
     ggplot2::labs(
-      title = "Forecast Shelf Life",
       x     = "Time",
       y     = y_lab,
       color = if (has_group) "Group" else NULL
@@ -314,7 +312,6 @@ et_plot_calibration <- function(cal, group_col = NULL) {
     ggplot2::geom_abline(slope = 1, intercept = 0,
                          linetype = "dashed", color = "grey50") +
     ggplot2::labs(
-      title = "Calibration: Observed vs Nominal Coverage",
       x     = "Nominal CI level",
       y     = "Observed coverage"
     ) +
@@ -382,7 +379,6 @@ et_plot_forecast <- function(predictions, observed = NULL,
     ) +
     ggplot2::scale_alpha_continuous(range = c(0.12, 0.45), guide = "none") +
     ggplot2::labs(
-      title = "Forecast Fan Chart",
       x     = if (!is.null(time_col)) time_col else "Observation",
       y     = "Response"
     ) +
@@ -483,7 +479,6 @@ et_plot_prior_posterior <- function(model, max_preds = 8L,
     ) +
     ggplot2::geom_vline(xintercept = 0, linetype = "dotted", color = "grey30") +
     ggplot2::labs(
-      title = "Prior vs Posterior: Regression Coefficients",
       x     = "Value",
       y     = "Density"
     ) +
@@ -564,7 +559,6 @@ et_plot_coefficients.et_model_list <- function(model) {
     ) +
     ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
     ggplot2::labs(
-      title = "Coefficient Estimates: Posterior (blue) vs Regularized (red \u00d7)",
       x     = "Coefficient",
       y     = NULL
     ) +
@@ -637,8 +631,7 @@ et_plot_sensitivity <- function(sens, show = c("horizon", "env_share", "ratio"))
         values = c("observed" = 16, "projected" = 21, "lower bound" = 2),
         drop = FALSE, name = "Horizon type"
       ) +
-      ggplot2::labs(x = x_lab, y = "Forecast horizon",
-                    title = "Shelf life vs. assumed measurement noise")
+      ggplot2::labs(x = x_lab, y = "Forecast horizon")
   } else if (show == "env_share") {
     p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[["x"]],
                                           y = .data[["env_share"]])) +
@@ -647,8 +640,7 @@ et_plot_sensitivity <- function(sens, show = c("horizon", "env_share", "ratio"))
       ggplot2::scale_y_continuous(labels = scales_percent_safe,
                                   limits = c(0, NA)) +
       ggplot2::labs(x = x_lab,
-                    y = "Environmental share of total variance",
-                    title = "How much of the forecast variance is environmental?")
+                    y = "Environmental share of total variance")
   } else {
     thr <- attr(sens, "threshold")
     p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[["x"]],
@@ -658,8 +650,7 @@ et_plot_sensitivity <- function(sens, show = c("horizon", "env_share", "ratio"))
       ggplot2::geom_hline(yintercept = if (is.null(thr)) 1 else thr,
                           linetype = "dashed") +
       ggplot2::labs(x = x_lab,
-                    y = "Mean CI width / plausible range",
-                    title = "Forecast informativeness vs. noise")
+                    y = "Mean CI width / plausible range")
   }
 
   p + et_theme()
@@ -727,8 +718,7 @@ et_plot_pit <- function(pit, bins = 10L) {
     ggplot2::geom_hline(data = bands, inherit.aes = FALSE,
                         ggplot2::aes(yintercept = .data[["expected"]]),
                         linetype = "dashed", color = "grey40") +
-    ggplot2::labs(x = "PIT", y = "Count",
-                  title = "PIT histogram (calibration)") +
+    ggplot2::labs(x = "PIT", y = "Count") +
     et_theme()
 
   if (has_group) p <- p + ggplot2::facet_wrap(ggplot2::vars(.data[["group"]]))

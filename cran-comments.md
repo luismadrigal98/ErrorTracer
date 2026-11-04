@@ -25,6 +25,8 @@ the variance accounting. Bare Stan objects are refused with the
 carry neither the family, the formula, nor the training data the decomposition
 reads.
 
+Two changes to plot output. `et_plot_*()` no longer sets a default title: these figures are made for manuscripts, where the caption is typeset by the journal, and a title in the image duplicates it. Axis labels, legend titles and facet strips are unchanged, and a title is still available through `+ labs(title = )`.
+
 It also fixes a faceting defect in `et_plot_pit()`: the dashed uniform line
 and the 95% consistency band were computed once from the mean group size and
 drawn identically in every panel, so panels of unequal size were judged against
@@ -114,21 +116,25 @@ failed on the oldrel CRAN checks. It is now defined in `R/utils.R`.
 
 ## R CMD check results
 
-`R CMD check --as-cran --run-donttest` on the built tarball:
+`R CMD check --as-cran --run-donttest` on the built tarball, R 4.6.1 on Linux:
 
-0 errors | 0 warnings | 2 notes
+0 errors | 0 warnings | 1 note
 
-**Note 1 — days since last update.** This flags submission cadence, not a code
-issue. If it is too soon after the previous version, I am happy to wait and
-resubmit; please tell me the preferred interval.
-
-**Note 2 — slow examples.** The expected note for a Stan-backed package: five
+**Note, slow examples.** The expected note for a Stan-backed package: six
 examples each fit one Bayesian model, so almost all of that time is Stan model
-**compilation** rather than computation. The examples are already minimal — 20
+**compilation** rather than computation. The examples are already minimal (20
 observations, one predictor, a single chain of 500 iterations, of which
-sampling accounts for under a second — so the cost is not reducible by
-shrinking them further. They are wrapped in `\donttest{}`. This note was
-present in the previously accepted releases.
+sampling accounts for under a second), so the cost is not reducible by
+shrinking them further. They are wrapped in `\donttest{}`. Measured elapsed
+times for this submission: `as_et_model` 84.0s, `shelf_life` 80.1s,
+`et_calibrate` 79.9s, `decompose_uncertainty` 79.8s, `et_priors_split` 78.7s,
+`et_fit` 78.1s. An equivalent note was present in the previously accepted
+releases.
+
+The incoming checks may additionally raise a "days since last update" note,
+since this release follows closely on the previous one. That reflects
+submission cadence rather than a code issue; if it is too soon I am happy to
+wait and resubmit, and would welcome being told the preferred interval.
 
 For context on total check time: the `testthat` suite is gated with
 `skip_on_cran()`, so it runs in a few seconds under CRAN's settings (715

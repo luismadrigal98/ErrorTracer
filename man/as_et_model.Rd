@@ -13,6 +13,15 @@ as_et_model(fit, data = NULL, prior_spec = NULL, seed = NULL)
 \method{et_predict}{brmsfit}(model, newdata, ...)
 }
 \arguments{
+\item{model}{A \code{brmsfit}, when \code{et_predict()} or
+\code{et_diagnose()} is called on one directly. It is passed through
+\code{as_et_model()} first.}
+
+\item{loo}{Logical. Whether \code{\link{et_diagnose}} computes LOO-CV.}
+
+\item{...}{Further arguments forwarded to \code{\link{et_predict}} or
+\code{\link{et_diagnose}}.}
+
 \item{fit}{A fitted \code{brmsfit}.}
 
 \item{data}{Training data. Defaults to the model frame stored on the fit
@@ -29,6 +38,9 @@ the prior-versus-posterior plots read it; anything else is ignored.}
 that can be recovered from the back end, and is otherwise \code{NULL},
 which leaves predictions drawing from the ambient stream unless
 \code{et_predict(seed = )} supplies one.}
+
+\item{newdata}{Data frame of covariate values to forecast at, forwarded to
+\code{\link{et_predict}}.}
 }
 \value{
 An \code{et_model} object, identical in structure to what

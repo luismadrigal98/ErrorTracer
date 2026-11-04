@@ -23,7 +23,7 @@ The package is designed for ecological and genomic time-series forecasting in wh
 | **Forecast shelf life** | Quantifies the exact time point at which a forecast becomes uninformative |
 | **Group-level fitting** | One function call fits and predicts across all groups (e.g., SNP clusters, species, sites) |
 | **Calibration assessment** | Observed vs. nominal coverage probability at multiple CI levels |
-| **Rich visualizations** | Six `ggplot2`-based plotting functions, all returning customizable objects |
+| **Rich visualizations** | Eight `ggplot2`-based plotting functions, all returning customizable objects |
 | **Full S3 class system** | Consistent `print`, `summary`, and `plot`-family methods across all objects |
 
 ---
@@ -420,6 +420,12 @@ priori and there is no selection to protect against.
 ## Visualization
 
 All plotting functions return `ggplot2` objects that can be further customized with standard `ggplot2` additions (`+ theme(...)`, `+ labs(...)`, etc.).
+
+They deliberately set no figure title or subtitle. These plots are meant for manuscripts, where the caption is typeset separately and a title baked into the image duplicates it. Add one when you want it:
+
+```r
+et_plot_pit(pit) + ggplot2::labs(title = "Posterior-predictive calibration")
+```
 
 ```r
 # Stacked bar: proportional contribution of each variance component

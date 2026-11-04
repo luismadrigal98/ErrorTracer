@@ -26,6 +26,16 @@ variance accounting that follows it.
 
 ## Bug fixes
 
+* **Plots no longer carry a built-in title.** Every `et_plot_*()` function set
+  a default `title` in `labs()`. For a package whose figures are made to go
+  into manuscripts that is the one piece that is always wrong: a
+  journal typesets the caption itself, so a title baked into the image
+  duplicates it, cannot be copy-edited, and can end up contradicting it. It
+  also put the burden on the user to know the title was there and to remove it.
+  Axis labels, legend titles and facet strip labels are unchanged, and a title
+  remains one composition away for interactive use,
+  `et_plot_pit(pit) + ggplot2::labs(title = "...")`.
+
 * **`et_plot_pit()` drew one pooled reference line across panels of different
   sizes.** The dashed uniform line and the shaded 95% band were computed from
   `mean(n_per)/bins` and then drawn identically in every facet, so a panel
