@@ -113,12 +113,12 @@ failed on the oldrel CRAN checks. It is now defined in `R/utils.R`.
 
 ## Test environments
 
-* local Linux install (Ubuntu), R 4.6.1
+* local Linux install (Ubuntu), R 4.6.2
 * win-builder (devel and release)
 
 ## R CMD check results
 
-`R CMD check --as-cran --run-donttest` on the built tarball, R 4.6.1 on Linux:
+`R CMD check --as-cran --run-donttest` on the built tarball, R 4.6.2 on Linux:
 
 0 errors | 0 warnings | 1 note
 
@@ -128,9 +128,9 @@ examples each fit one Bayesian model, so almost all of that time is Stan model
 observations, one predictor, a single chain of 500 iterations, of which
 sampling accounts for under a second), so the cost is not reducible by
 shrinking them further. They are wrapped in `\donttest{}`. Measured elapsed
-times for this submission: `as_et_model` 84.0s, `shelf_life` 80.1s,
-`et_calibrate` 79.9s, `decompose_uncertainty` 79.8s, `et_priors_split` 78.7s,
-`et_fit` 78.1s. An equivalent note was present in the previously accepted
+times for this submission: `as_et_model` 54.4s, `shelf_life` 50.2s,
+`decompose_uncertainty` 49.1s, `et_calibrate` 48.9s, `et_priors_split` 47.2s,
+`et_fit` 47.1s (298s in total). An equivalent note was present in the previously accepted
 releases.
 
 The incoming checks may additionally raise a "days since last update" note,
@@ -139,10 +139,24 @@ submission cadence rather than a code issue; if it is too soon I am happy to
 wait and resubmit, and would welcome being told the preferred interval.
 
 For context on total check time: the `testthat` suite is gated with
-`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (715
+`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (722
 tests across 22 files locally with `NOT_CRAN=true`, 0 failures, 0 skips; the
 suite grew from 572 at 1.3.1 as each defect below was pinned by a regression
 test). Vignettes do not fit models at build time.
+
+## CRAN incoming NOTE: possibly misspelled words
+
+The incoming check flags `Sobol` and `Kaplan` in the Description. Both are
+surnames and both are spelled correctly:
+
+* **Sobol** — Ilya M. Sobol', after whom Sobol indices (variance-based global
+  sensitivity indices) are named; the package implements them in
+  `et_sobol()`.
+* **Kaplan** — Edward L. Kaplan, of the Kaplan-Meier estimator, which
+  `et_shelf_life_pool()` uses to pool right-censored shelf lives across
+  rolling forecast origins.
+
+Neither is a package or software name, so neither is quoted.
 
 ## Reverse dependencies
 
