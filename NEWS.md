@@ -26,6 +26,24 @@ variance accounting that follows it.
 
 ## Bug fixes
 
+* **`et_plot_decomposition(proportional = TRUE)` did not produce shares.**
+  Each component was divided by `total_var`, but the components drawn are only
+  the named channels, so the bars summed to `1 - closure_gap/total_var` for an
+  iid model rather than to 1. On real forecasts that left bars anywhere from
+  0.88 to 1.18 on an axis labelled "Share of predictive variance", with nothing
+  in the figure to say what was missing. Components are now normalised by the
+  channels actually drawn, so every bar sums to exactly 1, and the y axis is
+  formatted as a percentage. For an autocorrelation model the denominator is
+  unchanged, since `temporal_var` is the remainder against `total_var`. The iid
+  `closure_gap` is deliberately not drawn as a segment: it is a diagnostic, not
+  a source of variance. It remains in the decomposition and in `print()`, and a
+  material one now raises an informational message naming its mean and maximum.
+
+* **Long group labels collided on the x axis.** Tick angling keyed on the x
+  variable being `obs_id`, so a grouped plot kept horizontal labels however
+  long the group names were; twenty SNP identifiers overprinted into an
+  unreadable band. Angling is now decided from the labels themselves.
+
 * **Plots no longer carry a built-in title.** Every `et_plot_*()` function set
   a default `title` in `labs()`. For a package whose figures are made to go
   into manuscripts that is the one piece that is always wrong: a

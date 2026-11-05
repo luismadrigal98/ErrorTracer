@@ -52,13 +52,13 @@ The package provides a seven-step pipeline:
 
 | Step | Function | What it does |
 |---|---|---|
-| 1 | `extract_priors()` | Convert a regularized model to `brms` priors |
-| 2 | `et_fit()` | Fit the informed Bayesian model |
+| 1 | `extract_priors()` / `et_priors_split()` | Convert a regularized or standard model to `brms` priors |
+| 2 | `et_fit()` / `as_et_model()` | Fit the informed Bayesian model (or wrap an existing `brms` fit) |
 | 3 | `et_diagnose()` | Convergence, ESS, LOO-CV |
-| 4 | `et_predict()` | Posterior prediction + environmental noise propagation |
-| 5 | `decompose_uncertainty()` | Variance decomposition (param / env / residual, plus temporal for autocor models) |
-| 6 | `shelf_life()` | Forecast horizon / shelf-life analysis |
-| 7 | `et_calibrate()` | Observed vs. nominal coverage |
+| 4 | `et_predict()` | Posterior prediction + environmental noise / ensemble propagation |
+| 5 | `decompose_uncertainty()` / `et_sobol()` | Variance decomposition (param / group / env / residual / temporal) & Sobol indices |
+| 6 | `shelf_life()` / `et_shelf_life_pool()` | Forecast horizon / shelf-life analysis & rolling-origin pooling |
+| 7 | `et_calibrate()`, `et_pit()`, `et_skill_score()` | Coverage, PIT calibration, and CRPS skill against nulls |
 
 Visualisation functions (`et_plot_*`) return `ggplot2` objects at every step.
 
@@ -67,28 +67,31 @@ Visualisation functions (`et_plot_*`) return `ggplot2` objects at every step.
 We work with `et_sim`, a list bundled with the package.  It represents a
 hypothetical mountain plant site where allele-frequency change on the
 **arcsin-sqrt scale** (`z_diff`) in two SNP clusters (A and B) is linked to
-three growing-season climate predictors.
+three growing-season climate predictors (plus ten independent nuisance
+predictors `d1`..`d10` with zero true effect).
 
 > **Note on the arcsin-sqrt transformation.**
 > Raw allele frequencies $f \in [0,\,1]$ are transformed via
 > $z = \arcsin(\sqrt{f})$.  The result is unbounded (theoretically
 > $[0,\,\pi/2] \approx [0,\,1.57]$ for a single chromosome, but changes
-> $\Delta z$ are unbounded in principle).  **Do not use** `plausible_range =
+> $\Delta z$ are unbounded in principle).  **Do not use** `response_scale =
 > c(-1, 1)` for this response — instead derive the range from the training
-> data or use a biologically motivated interval.
+> data (the default when `response_scale = NULL`) or use a biologically
+> motivated interval.
 
 | Predictor | Description | Units (raw) |
 |---|---|---|
 | `Tmean` | Mean growing-season temperature | °C (standardised) |
 | `PPT`   | Total growing-season precipitation | mm (standardised) |
 | `SWE`   | Peak snow water equivalent | mm (standardised) |
+| `d1`..`d10` | Ten independent nuisance predictors (zero true effect) | standardised |
 
-The dataset has a training period (1995–2014, 20 years) and a forecast period
-(2015–2019, 5 years).  The forecast climate is slightly warmer than the
-training period on average (Tmean ~1 SD above training mean), representing a
-mild warming trend.  Because the data are simulated, we know the **true
-regression coefficients** — stored in `et_sim$true_params` — which lets us
-validate parameter recovery and calibration.
+The dataset has a training period (1920–2019, 100 years per cluster) and a
+forecast period (2020–2034, 15 years per cluster).  The forecast climate is
+warmer than the training period on average (reflecting a mild warming trend).
+Because the data are simulated, we know the **true regression coefficients**
+— stored in `et_sim$true_params` — which lets us validate parameter recovery
+and calibration.
 
 **True data-generating model:**
 
@@ -103,14 +106,14 @@ $$
 | $\alpha$ (intercept) | 0.00 | 0.10 |
 | $\beta_1$ (Tmean) | **+0.50** | **+0.30** |
 | $\beta_2$ (PPT)   | **−0.30** | **−0.20** |
-| $\beta_3$ (SWE)   | **+0.20** | **−0.10** |
-| $\sigma$ | 0.40 | 0.50 |
+| $\beta_3$ (SWE)   | **+0.20** | **−0.25** |
+| $\sigma$ | 0.30 | 0.35 |
 
 Both clusters have a positive response to warming (`Tmean`) and a negative
 response to precipitation (`PPT`).  They differ in the direction of their
 response to snowpack (`SWE`) and in residual variability — cluster B is noisier
-(σ = 0.50 vs. 0.40), which will be reflected in its wider forecast intervals
-and shelf-life ratio closer to the uninformative threshold.
+(σ = 0.35 vs. 0.30), which will be reflected in its wider forecast intervals
+and higher shelf-life ratio.
 
 ---
 
@@ -135,51 +138,29 @@ SEED   <- 42L
 
 ---
 
+```{r data-setup, include = FALSE, eval = TRUE}
+library(ErrorTracer)
+data(et_sim)
+```
+
 # Exploring the dataset
 
-```{r data-overview}
+```{r data-overview, eval = TRUE}
 str(et_sim, max.level = 2)
-# List of 7
-#  $ train         :'data.frame': 40 obs. of 6 variables:
-#  $ forecast      :'data.frame': 10 obs. of 5 variables:
-#  $ validation    :'data.frame': 10 obs. of 3 variables:
-#  $ true_params   :List of 2
-#  $ env_noise     :List of 3
-#  $ standardization:List of 3
-#  $ description   : chr ...
 ```
 
-```{r head-train}
-head(et_sim$train)
-#   year cluster_id      Tmean        PPT        SWE     z_diff
-# 1 1995          A -0.6775963  0.9119435 -0.1386249 -0.4917161
-# 2 1996          A  0.4866542 -1.7284276 -1.4391959  0.4088745
-# 3 1997          A -0.4935765 -0.3945083 -0.7267905  0.2352018
-# 4 1998          A -0.2397691 -0.9805886 -0.8206722  0.3194194
-# 5 1999          A -0.5193449  1.1304845  1.6453631 -0.2554886
-# 6 2000          A -1.5333598  0.6437605  0.6252043 -0.5864645
+```{r head-train, eval = TRUE}
+head(et_sim$train[, 1:6])
 ```
 
-```{r true-params}
+```{r true-params, eval = TRUE}
 # True coefficients — known because the data are simulated
 et_sim$true_params
-# $A
-#   intercept     Tmean       PPT       SWE     sigma
-#        0.00      0.50     -0.30      0.20      0.40
-#
-# $B
-#   intercept     Tmean       PPT       SWE     sigma
-#        0.10      0.30     -0.20     -0.10      0.50
 ```
 
-```{r forecast-predictors}
-# Forecast predictors are slightly above training range in Tmean (warming trend)
-et_sim$forecast[et_sim$forecast$cluster_id == "A", ]
-#   year cluster_id     Tmean       PPT        SWE
-# 1 2015          A 0.6918714  0.291...  0.102...
-# 2 2016          A 0.7012... ...
-# ...
-# Forecast Tmean is ~0.7-1.4 SDs above training mean — mild extrapolation.
+```{r forecast-predictors, eval = TRUE}
+# Forecast predictors sit above the training range in Tmean (warming trend)
+head(et_sim$forecast[et_sim$forecast$cluster_id == "A", 1:5])
 ```
 
 ## Visualise the training data
@@ -233,9 +214,9 @@ clusters simultaneously using the `grouping` argument.
 ## Step 1 — Elastic net for prior extraction
 
 We fit a cross-validated elastic net (`alpha = 0.5`) on the training data.
-The elastic net simultaneously performs variable selection under regularisation
-and provides coefficient estimates that become prior means in the subsequent
-Bayesian model.
+The elastic net performs regularised estimation (and variable selection when
+nuisance predictors `d1`..`d10` are included) and provides coefficient
+magnitudes that scale the priors in the subsequent Bayesian model.
 
 ```{r enet-fit}
 train_A <- et_sim$train[et_sim$train$cluster_id == "A", ]
@@ -254,22 +235,14 @@ cv_fit_A <- glmnet::cv.glmnet(
 coef(cv_fit_A, s = "lambda.min")
 # 4 x 1 sparse Matrix of class "dgCMatrix"
 #             lambda.min
-# (Intercept)  0.0430
-# Tmean        0.6658
-# PPT         -0.4591
-# SWE          0.3775
+# (Intercept)  0.0453
+# Tmean        0.4983
+# PPT         -0.2722
+# SWE          0.1683
 ```
 
-> **Note on small n:** With 20 observations and 10-fold CV, R will print a
-> warning about fewer than 3 observations per fold.  This is expected and
-> harmless — the elastic net still regularises correctly; it just uses the
-> default grouped cross-validation.
-
-The elastic net correctly recovers the signs of all three predictors.  The
-magnitudes are somewhat inflated relative to the true values (Tmean = 0.50,
-PPT = −0.30, SWE = 0.20) because with n = 20 the regularisation cannot
-fully separate the signal from sampling noise.  This shrinkage toward the
-true values will be completed by the Bayesian posterior.
+The elastic net closely recovers the signs and magnitudes of all three
+predictors (true values: Tmean = 0.50, PPT = −0.30, SWE = 0.20).
 
 ```{r enet-plot, fig.cap="Cross-validated elastic net for cluster A."}
 plot(cv_fit_A)
@@ -278,8 +251,12 @@ plot(cv_fit_A)
 ## Step 2 — Extract informed priors
 
 `extract_priors()` converts the elastic net coefficients into a `brmsprior`
-object.  The prior SD for each coefficient is set to
-`multiplier × |coef|` (floored at `min_sd`).
+object.  With the default `shrinkage = "zero"`, each coefficient's prior is
+centred at zero with SD set to `multiplier × |coef|` (floored at `min_sd`) —
+a regularising prior whose scale is data-informed without reusing the point
+estimate as a prior mean (pass `shrinkage = "estimate"` to centre the priors
+on the fitted coefficients, or use `et_priors_split()` to fit the first stage
+on a disjoint subset of rows).
 
 ```{r extract-priors}
 prior_spec_A <- extract_priors(
@@ -295,21 +272,20 @@ print(prior_spec_A)
 #   Predictors  : 3
 #   Multiplier  : 2
 #   Min SD      : 0.1
+#   Shrinkage   : zero (prior means at 0; regularizing)
 #   Coefficients:
-#     Tmean                 mean =   0.6658  sd =   1.3316
-#     PPT                   mean =  -0.4591  sd =   0.9182
-#     SWE                   mean =   0.3775  sd =   0.7550
+#     Tmean                 prior mean =   0.0000  sd =   0.9966  (coef =   0.4983)
+#     PPT                   prior mean =   0.0000  sd =   0.5444  (coef =  -0.2722)
+#     SWE                   prior mean =   0.0000  sd =   0.3365  (coef =   0.1683)
 ```
 
-The large prior SDs (1.3 for Tmean, 0.9 for PPT, 0.8 for SWE) reflect the
-`multiplier = 2` setting — priors are wide enough that the likelihood can
-readily update them, while still encoding the directional information from the
-elastic net.
+The prior SDs (1.00 for Tmean, 0.54 for PPT, 0.34 for SWE) reflect the
+`multiplier = 2` setting — wide enough for the likelihood to dominate on
+strong effects while regularising smaller ones.
 
-> **Design note:** The intercept is excluded from the informed prior.  In this
-> simulation the predictors are standardised to zero mean in the training
-> period, so the intercept carries no predictive information.  The intercept
-> receives a default `Normal(0, 2.5)` prior.
+> **Design note:** The intercept is excluded from the informed coefficient
+> priors, and `intercept_prior_sd = NULL` (default) lets `brms` use its
+> data-aware default (`student_t(3, median(y), mad(y))`).
 
 ## Step 3 — Fit the Bayesian model
 
@@ -331,10 +307,10 @@ fit_A <- et_fit(
 print(fit_A)
 # ErrorTracer model (et_model)
 #   Formula : z_diff ~ Tmean + PPT + SWE
-#   n obs   : 20
-#   Chains  : 2  Iter: 1000  Warmup: 500
+#   n obs   : 100
+#   Chains  : 2   Iter: 1000   Warmup: 500
 #   Priors  : informed (glmnet, 3 predictors)
-#   Rhat max: 1.004
+#   Rhat max: 1.014
 ```
 
 ```{r et-summary}
@@ -419,68 +395,64 @@ fcast_A <- et_sim$forecast[et_sim$forecast$cluster_id == "A", ]
 pred_A <- et_predict(
   model     = fit_A,
   newdata   = fcast_A,
-  env_noise = et_sim$env_noise,   # list(Tmean = 0.30, PPT = 0.20, SWE = 0.15)
+  env_noise = et_sim$env_noise,   # Tmean = 0.30, PPT = 0.20, SWE = 0.15, d1..d10 = 0
   n_draws   = 1000L,
-  ci_levels = c(0.50, 0.80, 0.90, 0.95),
-  n_perturb = 300L                # draws for the perturbation step
+  ci_levels = c(0.50, 0.80, 0.90, 0.95)
 )
 
 print(pred_A)
 # ErrorTracer prediction (et_prediction)
-#   Observations : 5
-#   Draws        : 1000
-#   CI levels    : 0.5, 0.8, 0.9, 0.95
+#   Observations  : 15
+#   Draws         : 1000
+#   CI levels     : 0.5, 0.8, 0.9, 0.95
+#   Interval type : predictive
 #   Mean var decomposition (across observations):
-#     Parameter    : 0.0441
-#     Environmental: 0.0579
-#     Residual     : 0.2173
-#     Total        : 0.2673
+#     Parameter    : 0.0040
+#     Environmental: 0.0264  (MC SE: 0.0014)
+#     Residual     : 0.0870
+#     Total        : 0.1174  (measured predictive variance)
+#     Closure gap  : 0.0001  (Monte Carlo; compare MC SE above)
 ```
 
-In this dataset the environmental uncertainty (0.058) is comparable in
-magnitude to the parameter uncertainty (0.044) — a noteworthy finding.
-With only 20 training observations, measurement noise in the climate inputs
-contributes almost as much uncertainty as imprecision in the estimated
-regression coefficients.  Residual process noise (0.217) remains dominant
-because σ = 0.40 is large relative to the signal.
+In this dataset the environmental uncertainty is several times larger than the
+parameter uncertainty — with 100 training observations the regression
+coefficients are well estimated, so measurement noise in the climate inputs
+contributes substantially more forecast variance than coefficient imprecision.
+Residual process noise remains the largest single component.
 
 ```{r ci-table}
 # 90% credible intervals by forecast year
 ci90 <- pred_A$credible_intervals[pred_A$credible_intervals$ci_level == 0.90, ]
 ci90$year <- fcast_A$year
-ci90[, c("year", "lower", "median", "upper", "width")]
-#   year    lower  median   upper  width
-# 1 2015   -0.507   0.381   1.213  1.720
-# 2 2016    0.009   0.794   1.660  1.651
-# 3 2017   -0.009   0.875   1.631  1.640
-# 4 2018   -0.179   0.649   1.460  1.639
-# 5 2019   -0.767   0.131   1.002  1.769
+head(ci90[, c("year", "lower", "median", "upper", "width")])
+#    year      lower     median     upper    width
+# 31 2020 -0.9124320 -0.3710932 0.2328418 1.145274
+# 32 2021 -0.4276259  0.1268306 0.6656614 1.093287
+# 33 2022 -0.7306874 -0.1616093 0.4136616 1.144349
+# 34 2023 -0.2588986  0.2843572 0.8218421 1.080741
+# 35 2024 -0.4706744  0.1134329 0.6489682 1.119643
+# 36 2025 -0.3844870  0.1803172 0.7336616 1.118149
 ```
-
-The medians are positive across all forecast years, consistent with the mild
-warming trend pushing Tmean ~0.7–1.4 SDs above the training mean.  CI widths
-are 1.64–1.77, somewhat narrower than the full plausible range of 2.
 
 ## Step 6 — Uncertainty decomposition
 
 ```{r decompose}
 decomp_A <- decompose_uncertainty(pred_A)
-decomp_A
-#   obs_id total_var param_var  env_var residual_var
-# 1      1    0.2627    0.0202   0.0541       0.2173
-# 2      2    0.2667    0.0361   0.0588       0.2173
-# 3      3    0.2573    0.0364   0.0541       0.2173
-# 4      4    0.2529    0.0427   0.0653       0.2173
-# 5      5    0.2972    0.0849   0.0574       0.2173
+head(decomp_A)
+#   obs_id total_var param_var env_var v_env_mcse residual_var closure_gap
+# 1      1    0.1241    0.0061  0.0279     0.0054       0.0894      0.0007
+# 2      2    0.1218    0.0049  0.0262     0.0053       0.0894      0.0013
+# ...
 ```
 
-`residual_var` is constant across observations — it equals the posterior mean
-of σ² and represents process noise that cannot be reduced by better predictors
-or more training data.  `param_var` increases slightly in observations 4–5,
-reflecting that those forecast years (2018–2019) are more distant from the
-training period's centroid, where the model is less certain.
+`residual_var` is constant across observations (for a Gaussian identity model)
+— it equals the posterior mean of σ² and represents process noise that cannot
+be reduced by better predictors or more training data. `total_var` is the
+measured variance of the environmentally inclusive posterior predictive draws,
+and `closure_gap` records the Monte Carlo remainder
+`total_var - (param_var + env_var + residual_var)`.
 
-```{r plot-decomp, fig.cap="Variance decomposition for cluster A over the 2015-2019 forecast window."}
+```{r plot-decomp, fig.cap="Variance decomposition for cluster A over the 2020-2034 forecast window."}
 et_plot_decomposition(decomp_A, proportional = TRUE)
 ```
 
@@ -506,64 +478,46 @@ variance — identifying additional drivers of allele-frequency change.
 ## Step 7 — Forecast shelf life
 
 The shelf life analysis asks: *at which forecast year does the 90% CI width
-exceed the biologically plausible response range?*  Because `z_diff` is on
-the arcsin-sqrt scale (unbounded), we derive the plausible range from the
-training data rather than assuming a fixed ±1 bound.
+exceed the biologically plausible response scale?*  Because `z_diff` is on
+the arcsin-sqrt scale (unbounded), we derive the response scale from the
+training data (which is also the default when `response_scale = NULL`).
 
 ```{r shelf-life}
-# Derive plausible range from training data (arcsin-sqrt scale — unbounded)
-pr_A <- range(train_A$z_diff)   # e.g. c(-1.50, 2.04) => width ~ 3.54
+# Derive response scale from training data (arcsin-sqrt scale — unbounded)
+pr_A <- range(train_A$z_diff)   # c(-1.73, 1.57) => width ~ 3.30
 
 sl_A <- shelf_life(
   predictions              = pred_A,
-  plausible_range          = pr_A,
+  response_scale           = pr_A,
   ci_level                 = 0.90,
-  threshold                = 1.0,        # uninformative when CI width >= plausible range
+  threshold                = 1.0,        # uninformative when CI width >= response scale
   time_col                 = "year",
-  min_slope_for_projection = 1e-4,       # positive slope required to project
+  min_run                  = 2L,         # require >= 2 consecutive exceedances
+  projection_alpha         = 0.05,       # require significantly positive slope to project
+  min_slope_for_projection = 1e-4,       # minimum slope magnitude to project
   max_extrapolation_factor = 10          # cap: project <= last_year + 10 * window_width
 )
 
 print(sl_A)
-# ErrorTracer shelf life analysis
-#   Observations     : 5
-#   Plausible range  : 3.54
-#   Threshold        : 1
-#   Informative      : 5 / 5
-#   Mean CI/range    : 0.488
-#   Max CI/range     : 0.499
-#   Shelf life       : > 2019 (lower bound — all periods informative, no trend)
-#   Detail           : All 5 forecast periods informative. Linear trend
-#                      (slope = 0.00241 per time unit) projects threshold
-#                      crossing at ~2234.3, but this exceeds the extrapolation
-#                      cap (2059). Shelf life > 2019.
 ```
 
 ```{r shelf-life-table}
-as.data.frame(sl_A)
-#   obs_id  time ci_width plausible_range  ratio informative
-# 1      1  2015    1.720            3.54  0.486        TRUE
-# 2      2  2016    1.651            3.54  0.466        TRUE
-# 3      3  2017    1.640            3.54  0.463        TRUE
-# 4      4  2018    1.639            3.54  0.463        TRUE
-# 5      5  2019    1.769            3.54  0.499        TRUE
+head(as.data.frame(sl_A))
 ```
 
-All five forecast years are strongly informative (ratio ≈ 0.47–0.50, well
-below the threshold of 1.0).  The near-flat ratio trend means the forecast
-stays reliable throughout the 2015–2019 window.  A faint positive slope
-(0.00241 per year) technically implies a linear crossing at ~2234 — but since
-that is far beyond the 10× extrapolation cap (2059), the result is reported
-as a **lower bound**: the forecast remains informative for at least the entire
-observed window, and likely far beyond.
+All forecast years are strongly informative (ratio well below the threshold of
+1.0).  Because the CI/range ratio neither sustains a crossing (`min_run = 2`)
+nor exhibits a statistically significant upward slope (`projection_alpha =
+0.05`), the result is reported as a **lower bound** (`> 2034`): the forecast
+remains informative across the entire observed forecast window.
 
 > **Interpreting the three horizon modes:**
 >
 > | Mode | When it applies | What is returned |
 > |---|---|---|
-> | `observed` | Threshold crossed within the prediction window | First crossing time |
-> | `projected` | All periods informative; positive trend within cap | Extrapolated crossing time |
-> | `lower_bound` | All informative; no trend, or projection beyond cap | `> last observed time` |
+> | `observed` | Threshold crossed and sustained for `min_run` periods within the window | First sustained crossing time |
+> | `projected` | No sustained crossing; significantly positive trend within cap | Extrapolated crossing time + `se_t_star` |
+> | `lower_bound` | No sustained crossing; no significant trend, or projection beyond cap | `> last observed time` |
 >
 > Increase `max_extrapolation_factor` (or set it to `Inf`) to allow longer
 > projections if the biological context supports it.
@@ -756,8 +710,7 @@ pred_all <- et_predict(
   newdata   = et_sim$forecast,
   env_noise = et_sim$env_noise,
   n_draws   = 1000L,
-  ci_levels = c(0.50, 0.80, 0.90, 0.95),
-  n_perturb = 300L
+  ci_levels = c(0.50, 0.80, 0.90, 0.95)
 )
 
 print(pred_all)
@@ -769,26 +722,20 @@ print(pred_all)
 ```{r grouped-decompose}
 decomp_all <- decompose_uncertainty(pred_all)
 head(decomp_all)
-#   group obs_id total_var param_var  env_var residual_var
-# 1     A      1    0.2627    0.0202   0.0541       0.2173
-# 2     A      2    0.2667    0.0361   0.0588       0.2173
-# ...
-# 6     B      1    0.3374    0.0252   0.0122       0.2999
-# 7     B      2    0.3472    0.0488   0.0180       0.2999
 ```
 
-Cluster B has a systematically larger `residual_var` (0.30 vs. 0.22),
-directly reflecting its higher σ (0.50 vs. 0.40).
+Cluster B has a systematically larger `residual_var`, directly reflecting its
+higher σ (0.35 vs. 0.30).
 
 ## Shelf life comparison
 
 ```{r grouped-shelf-life}
 # Use the pooled training range across both clusters (arcsin-sqrt scale)
-pr_all <- range(et_sim$train$z_diff)   # e.g. c(-1.67, 2.04) => width ~ 3.71
+pr_all <- range(et_sim$train$z_diff)   # c(-1.73, 1.57) => width ~ 3.30
 
 sl_all <- shelf_life(
   pred_all,
-  plausible_range          = pr_all,
+  response_scale           = pr_all,
   ci_level                 = 0.90,
   threshold                = 1.0,
   time_col                 = "year",
@@ -796,19 +743,13 @@ sl_all <- shelf_life(
 )
 
 print(sl_all)
-# ErrorTracer shelf life analysis
-#   Observations     : 10
-#   Plausible range  : 3.71
-#   Threshold        : 1
-#   [A]  100.0% informative  mean ratio = 0.465  shelf life > 2019 (lower bound)
-#   [B]  100.0% informative  mean ratio = 0.544  shelf life > 2019 (lower bound)
 ```
 
-Both clusters remain strongly informative across all five forecast years.
-Cluster B's mean ratio (~0.54) is noticeably higher than cluster A's (~0.47),
-directly reflecting cluster B's higher residual variance (σ = 0.50 vs. 0.40).
+Both clusters remain strongly informative across all 15 forecast years.
+Cluster B's mean ratio is noticeably higher than cluster A's, directly
+reflecting cluster B's higher residual variance (σ = 0.35 vs. 0.30).
 Both are well below the uninformative threshold of 1.0, and neither crosses
-within the 2015–2019 window, so both are reported as lower bounds.
+within the 2020–2034 window, so both are reported as lower bounds.
 
 The difference in ratios has a practical implication: under a longer forecast
 horizon or with larger environmental noise inputs, **cluster B would approach
@@ -892,7 +833,7 @@ pred_gcm <- et_predict(
 # Shelf life over the 50-year horizon
 sl_gcm <- shelf_life(
   pred_gcm,
-  plausible_range          = range(train_A$z_diff),
+  response_scale           = range(train_A$z_diff),
   time_col                 = "year",
   max_extrapolation_factor = Inf    # allow projection beyond the 50-yr window
 )
@@ -931,9 +872,11 @@ plot(gcm_years, decomp_gcm$env_var,
 
 # Using `lm` instead of `glmnet`
 
-`extract_priors()` is not limited to elastic net.  The `lm` method uses
-OLS standard errors (× `multiplier`) as prior SDs instead of coefficient
-magnitudes, giving narrower priors when SEs are small.
+`extract_priors()` is not limited to elastic net.  With the default
+`shrinkage = "zero"`, the `lm` method scales prior SDs by coefficient
+magnitude (`multiplier * |coef|`, floored at `min_sd`); with
+`shrinkage = "estimate"` it uses OLS standard errors (`multiplier * SE`) around
+the OLS point estimates.
 
 ```{r lm-priors}
 lm_fit_A <- lm(z_diff ~ Tmean + PPT + SWE, data = train_A)
@@ -950,17 +893,18 @@ print(prior_lm_A)
 #   Predictors  : 3
 #   Multiplier  : 2
 #   Min SD      : 0.1
+#   Shrinkage   : zero (prior means at 0; regularizing)
 #   Coefficients:
-#     Tmean                 mean =   0.6669  sd =   1.3338
-#     PPT                   mean =  -0.4677  sd =   0.9354
-#     SWE                   mean =   0.3859  sd =   0.7719
+#     Tmean                 prior mean =   0.0000  sd =   1.0023  (coef =   0.5012)
+#     PPT                   prior mean =   0.0000  sd =   0.5490  (coef =  -0.2745)
+#     SWE                   prior mean =   0.0000  sd =   0.3416  (coef =   0.1708)
 ```
 
-In this case the OLS and elastic-net estimates are very close (n = 20 is not
-a sparse problem with only 3 predictors), so the two prior specifications
-lead to nearly identical posteriors.  The key advantage of the elastic-net
-pathway arises when the number of predictors is large relative to n, where
-regularisation is essential.
+In this case the OLS and elastic-net estimates on the three true predictors
+are very close, so the two prior specifications lead to nearly identical
+posteriors.  The key advantage of the elastic-net pathway arises when candidate
+nuisance predictors (`d1`..`d10`) are included and regularisation is needed to
+screen them out.
 
 ---
 
@@ -974,21 +918,21 @@ predictor, enabling back-transformation to original units with `unstandardize()`
 et_sim$standardization
 # $Tmean
 #      mean        sd
-# 15.5422  0.6797
+#  15.74798   1.24258
 #
 # $PPT
 #      mean        sd
-# 110.5460  14.6855
+# 108.60625  15.94841
 #
 # $SWE
 #      mean        sd
-# 86.9190  15.1885
+#  61.23573  20.64495
 
 # A Tmean of +1 SD corresponds to:
 unstandardize(z = 1.0,
               mu = et_sim$standardization$Tmean["mean"],
               s  = et_sim$standardization$Tmean["sd"])
-# [1] 16.22   ← 1 SD above training mean = 16.2 °C
+# [1] 16.99   ← 1 SD above training mean = 17.0 °C
 ```
 
 ---
@@ -999,32 +943,34 @@ This vignette has demonstrated the complete ErrorTracer pipeline on simulated
 data where the ground truth is known:
 
 1. **`extract_priors()`** converted elastic-net coefficients into
-   `brms`-compatible informed priors, transferring regularised estimates as
-   Bayesian prior means.
+   `brms`-compatible priors (centred at zero by default with `shrinkage =
+   "zero"` to avoid prior/likelihood double-use, or at the point estimates
+   with `shrinkage = "estimate"`).
 
 2. **`et_fit()`** fitted the Bayesian model for a single cluster and for
-   both clusters simultaneously via `grouping = "cluster_id"`.
+   both clusters simultaneously via `grouping = "cluster_id"` (or an
+   existing `brmsfit` can be passed directly via `as_et_model()`).
 
 3. **`et_diagnose()`** confirmed convergence (Rhat < 1.05, zero divergences)
    and adequate model fit (no high Pareto-k observations for cluster A).
 
-4. **`et_predict()`** generated posterior predictive draws and propagated
-   environmental measurement uncertainty.  Environmental noise contributed
-   ~17–25% of total variance — comparable to parameter uncertainty in this
-   small-sample setting.
+4. **`et_predict()`** generated reproducible posterior predictive draws and
+   propagated environmental measurement uncertainty into the credible
+   intervals and total predictive variance.
 
-5. **`decompose_uncertainty()`** partitioned forecast variance into three
-   components, identifying residual process noise as the dominant bottleneck
-   (~80%) in both clusters.
+5. **`decompose_uncertainty()`** partitioned measured forecast variance
+   (`total_var`) into parameter, environmental, and residual components,
+   identifying residual process noise as the dominant bottleneck in both
+   clusters.
 
-6. **`shelf_life()`** quantified that cluster A forecasts (mean ratio ~0.47)
-   are more informative than cluster B (~0.54), consistent with cluster B's
-   higher residual variance.  Both clusters are well below the uninformative
-   threshold (1.0), so the shelf life exceeds the entire 2015–2019 validation
-   window — reported as lower bounds.  The three-mode horizon logic
-   (`observed` / `projected` / `lower_bound`) and the
-   `max_extrapolation_factor` cap prevent spurious far-future projections
-   when the CI/range trend is nearly flat.
+6. **`shelf_life()`** quantified that cluster A forecasts are more informative
+   than cluster B, consistent with cluster B's higher residual variance.
+   Both clusters remain well below the uninformative threshold (1.0) across
+   the forecast window — reported as lower bounds.  The three-mode horizon
+   logic (`observed` / `projected` / `lower_bound`), persistence requirement
+   (`min_run = 2`), trend significance test (`projection_alpha = 0.05`), and
+   `max_extrapolation_factor` cap prevent spurious horizons or far-future
+   projections when the CI/range trend is flat.
 
 7. **`et_calibrate()`** confirmed near-nominal posterior predictive coverage
    on held-out validation data.

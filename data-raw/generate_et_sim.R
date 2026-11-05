@@ -183,7 +183,7 @@ cl_B <- .make_cluster_data("B", true_params$B, seed_offset = 2L)
 }
 
 et_sim <- list(
-  # Training data: 100 rows (2 clusters x 50 years)
+  # Training data: 200 rows (2 clusters x 100 years)
   train = .sort_df(rbind(cl_A$train, cl_B$train)),
 
   # Forecast predictors: 30 rows (2 clusters x 15 years)
@@ -213,7 +213,7 @@ et_sim <- list(
 
   description = paste(
     "Simulated allele-frequency-change (z_diff) for two SNP clusters (A, B)",
-    "at a mountain plant site. Training: 1970-2019 (50 obs/cluster).",
+    "at a mountain plant site. Training: 1920-2019 (100 obs/cluster).",
     "Forecast: 2020-2034 (15 obs/cluster). Three standardised climate",
     "predictors (Tmean, PPT, SWE) with low pairwise correlation, plus",
     "ten independent nuisance predictors (d1..d10) with zero true effect",
@@ -229,7 +229,7 @@ et_sim <- list(
 # ============================================================
 # 4. Sanity checks
 # ============================================================
-stopifnot(nrow(et_sim$train) == 2L * n_train)         # 100
+stopifnot(nrow(et_sim$train) == 2L * n_train)         # 200
 stopifnot(nrow(et_sim$forecast) == 2L * n_fcast)      # 30
 stopifnot(nrow(et_sim$validation) == 2L * n_fcast)    # 30
 stopifnot(all(c("year","cluster_id","Tmean","PPT","SWE","z_diff",

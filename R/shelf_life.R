@@ -140,7 +140,7 @@
 #'               cores = 1, refresh = 0)
 #' new_df <- data.frame(x1 = rnorm(10), year = 2021:2030)
 #' pred   <- et_predict(fit, newdata = new_df,
-#'                      n_draws = 200, n_perturb = 50)
+#'                      n_draws = 200)
 #' sl <- shelf_life(pred,
 #'                  response_scale            = range(df$y),
 #'                  ci_level                  = 0.90,

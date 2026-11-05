@@ -14,8 +14,9 @@ decompose_uncertainty(predictions, ...)
 }
 \value{
 A \code{data.frame} with columns
-  \code{obs_id, param_var, env_var, residual_var, total_var}
-  (plus \code{temporal_var} for autocorrelation models or
+  \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var}
+  (plus \code{group_var} when predicting for new random-effect levels,
+  \code{temporal_var} for autocorrelation models or
   \code{closure_gap} for iid ones, and a leading \code{group} column for
   grouped predictions).
 }
@@ -23,12 +24,19 @@ A \code{data.frame} with columns
 Returns a \code{data.frame} with the uncertainty decomposition stored
 inside an \code{et_prediction} object:
 \describe{
-  \item{param_var}{Variance of the posterior linear predictor — captures
-    uncertainty in fitted regression coefficients.}
+  \item{param_var}{Variance of the posterior linear predictor (on the
+    response scale) — captures uncertainty in fitted regression
+    coefficients.}
+  \item{group_var}{(Only present when predicting for a \emph{new} level of a
+    random effect.) Between-group variance integrated from the fitted
+    group-level distribution. When predicting for a group the fit has seen,
+    its estimated effect is part of \code{param_var} and this column is
+    absent.}
   \item{env_var}{Variance arising from measurement or prediction
     uncertainty in the predictor values (estimated via perturbation in
     \code{\link{et_predict}}).  A genuine sub-share of \code{total_var}
     (see below), not an add-on. Zero when \code{env_noise = NULL}.}
+  \item{v_env_mcse}{Monte Carlo standard error of \code{env_var}.}
   \item{residual_var}{Posterior mean of \eqn{\sigma^2} (or its
     family-specific analogue) — biological process noise, unmeasured
     drivers, and drift. For autocorrelation models this is the
@@ -45,7 +53,8 @@ inside an \code{et_prediction} object:
     \code{arma()}, \code{cosy()}, \code{unstr()}, \code{sar()}, or
     \code{car()}.) Variance attributable to residual temporal or spatial
     dependence beyond the named channels, computed as the signed remainder
-    \code{total_var - (param_var + env_var + residual_var)}.  This captures
+    \code{total_var - (param_var + env_var + residual_var)} (minus
+    \code{group_var} when present).  This captures
     the AR/MA/ARMA innovation accumulation that a single-innovation
     \code{residual_var} cannot represent.  It is \strong{signed}: a
     negative value means autocorrelated errors \emph{reduce} predictive
@@ -54,11 +63,17 @@ inside an \code{et_prediction} object:
     absorbs Monte Carlo error from the other channels, so read a
     \code{temporal_var} of the same order as \code{v_env_mcse} as noise.}
   \item{closure_gap}{(Only present for iid models.)
-    \code{total_var - (param_var + env_var + residual_var)}: how far the
+    \code{total_var - (param_var + env_var + residual_var)} (minus
+    \code{group_var} when present): how far the
     named channels fall short of the measured posterior predictive variance.
-    It is Monte Carlo error for a correctly specified iid model, of the order
-    of \code{v_env_mcse}.  A systematically large value means a channel is
-    mis-estimated.}
+    For a correctly specified iid model it is Monte Carlo error with mean
+    zero, but it is \emph{not} of the order of \code{v_env_mcse}: its scale
+    is the sampling error of a variance estimated from \code{n_draws}
+    draws, roughly \eqn{\sqrt{2 / n_{\mathrm{draws}}}} in relative terms,
+    so single observations commonly sit several per cent and occasionally
+    over ten per cent away from zero.  Judge it by its \emph{mean across
+    observations}, which should be indistinguishable from zero; a mean that
+    is not means a channel is mis-estimated.}
   \item{total_var}{Total predictive variance: the \strong{sampled variance
     of the environmentally inclusive posterior predictive draws}, which is
     the distribution the reported credible interval is drawn from.  The
@@ -87,7 +102,7 @@ fit <- et_fit(y ~ x1, data = df,
 new_df <- data.frame(x1 = rnorm(5))
 pred   <- et_predict(fit, newdata = new_df,
                      env_noise = list(x1 = 0.2),
-                     n_draws = 200, n_perturb = 50)
+                     n_draws = 200)
 decomp <- decompose_uncertainty(pred)
 head(decomp)
 }

@@ -6,11 +6,11 @@
 
 **ErrorTracer** provides a complete pipeline for ecological and genomic forecasting with climate or environmental covariates. It bridges the gap between regularized regression and fully Bayesian workflows in three steps:
 
-1. **Extract informed priors** from a fitted regularized or standard model (`glmnet`, `lm`, `glm`, `ranger`) and carry those estimates forward as prior means into a Bayesian model — rather than discarding them.
-2. **Decompose forecast uncertainty** into three independent sources — parameter uncertainty, environmental/covariate measurement uncertainty, and residual process variance — plus a fourth temporal-autocorrelation component whenever the model formula carries an `ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, or `car()` term.
-3. **Quantify forecast shelf life** — the time horizon at which a forecast's credible interval becomes wider than the biologically plausible response range, rendering it uninformative. This concept has no equivalent in any existing R package.
+1. **Extract informed priors** from a fitted regularized or standard model (`glmnet`, `lm`, `glm`, `ranger`) to set data-informed prior scales (default `shrinkage = "zero"`, centered at zero to avoid prior/likelihood double-use, or `shrinkage = "estimate"` to carry point estimates forward as prior means; `et_priors_split()` splits the sample so selection and likelihood share no rows) — or bring an existing `brms` fit straight into the pipeline via `as_et_model()`.
+2. **Decompose forecast uncertainty** into independent sources — parameter uncertainty, environmental/covariate measurement or trajectory uncertainty, and residual process variance — plus a group-level component when predicting for new random-effect levels and a temporal-autocorrelation component whenever the model formula carries an `ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, or `car()` term (alongside order-independent global Sobol indices via `et_sobol()`).
+3. **Quantify forecast shelf life** — the time horizon at which a forecast's credible interval becomes wider than the plausible response scale, rendering it uninformative, with optional CRPS skill gating (`et_skill_score()`) and Kaplan–Meier pooling across rolling forecast origins (`et_shelf_life_pool()`).
 
-The package is designed for ecological and genomic time-series forecasting in which a regularized (or plain) regression model is refit as a Bayesian model and predictions must be accompanied by a principled uncertainty budget. The API is fully general — response, predictors, and grouping are formula-driven.
+The package is designed for ecological and genomic time-series forecasting in which regression models are fitted or refitted in `brms` and predictions must be accompanied by a principled uncertainty budget. The API is fully general — response, predictors, and grouping are formula-driven.
 
 ---
 
@@ -18,12 +18,12 @@ The package is designed for ecological and genomic time-series forecasting in wh
 
 | Feature | Description |
 |---|---|
-| **Regularized → Bayesian prior pipeline** | `extract_priors()` converts `glmnet`, `lm`, `glm`, or `ranger` coefficients into `brms`-compatible priors |
-| **Uncertainty decomposition** | Partitions forecast variance into parameter / environmental / residual components, with a fourth temporal-autocorrelation component added automatically when the model formula contains `ar()`, `ma()`, `arma()`, `cosy()`, `unstr()`, `sar()`, or `car()` |
-| **Forecast shelf life** | Quantifies the exact time point at which a forecast becomes uninformative |
+| **Regularized → Bayesian prior pipeline** | `extract_priors()` converts `glmnet`, `lm`, `glm`, or `ranger` fits into `brms`-compatible priors (`et_priors_split()` for disjoint data-splitting); or pass an existing `brmsfit` directly via `as_et_model()` |
+| **Uncertainty decomposition** | Partitions measured posterior predictive variance (`total_var`) into parameter, environmental, and residual components (plus `group_var` for new random-effect levels and signed `temporal_var` for autocorrelation models), with global Sobol indices via `et_sobol()` |
+| **Forecast shelf life & pooling** | `shelf_life()` quantifies when a forecast becomes uninformative (with persistence and trend-significance gates); `et_shelf_life_pool()` pools horizons across origins via Kaplan–Meier |
+| **Skill scoring & calibration** | `et_skill_score()` scores forecasts against climatology or random-walk nulls (CRPS); `et_calibrate()` and `et_pit()` assess interval coverage and PIT uniformity |
 | **Group-level fitting** | One function call fits and predicts across all groups (e.g., SNP clusters, species, sites) |
-| **Calibration assessment** | Observed vs. nominal coverage probability at multiple CI levels |
-| **Rich visualizations** | Eight `ggplot2`-based plotting functions, all returning customizable objects |
+| **Rich visualizations** | Eight manuscript-ready `ggplot2`-based plotting functions (`et_plot_*()`), all returning customizable objects |
 | **Full S3 class system** | Consistent `print`, `summary`, and `plot`-family methods across all objects |
 
 ---
@@ -54,7 +54,7 @@ install.packages("rstan")
 
 ### Step 1 — Extract informed priors from a regularized model
 
-`extract_priors()` is an S3 generic that dispatches on the class of the fitted model. Coefficient estimates (or importance weights for `ranger`) are used as prior means; prior SDs are proportional to coefficient magnitude or standard error.
+`extract_priors()` is an S3 generic that dispatches on the class of the fitted model. With the default `shrinkage = "zero"`, coefficient priors are centered at zero with SDs scaled by coefficient magnitude (`multiplier * |coef|`, floored at `min_sd`) — a regularizing, ridge-style prior that avoids reusing point estimates in the likelihood. Set `shrinkage = "estimate"` to use the fitted coefficients as informative prior means.
 
 ```r
 library(ErrorTracer)
@@ -68,7 +68,8 @@ prior_spec <- extract_priors(
   lambda             = "lambda.min",  # or "lambda.1se"
   multiplier         = 2.0,           # prior SD = multiplier * |coef|
   min_sd             = 0.1,           # floor for prior SD
-  intercept_prior_sd = 2.5,           # intercept prior SD
+  shrinkage          = "zero",        # default: mean 0; or "estimate" for prior mean = coef
+  intercept_prior_sd = NULL,          # NULL lets brms use its data-aware default
   sigma_prior_scale  = 1.0            # half-Cauchy scale for sigma
 )
 
@@ -78,24 +79,25 @@ print(prior_spec)
 #   Predictors  : 5
 #   Multiplier  : 2
 #   Min SD      : 0.1
+#   Shrinkage   : zero (prior means at 0; regularizing)
 #   Coefficients:
-#     Tmean                 mean =   0.3241  sd =   0.6482
-#     PPT                   mean =  -0.1087  sd =   0.2174
+#     Tmean                 prior mean =   0.0000  sd =   0.6482  (coef =   0.3241)
+#     PPT                   prior mean =   0.0000  sd =   0.2174  (coef =  -0.1087)
 #     ...
 ```
 
 **Supported model classes and their prior construction:**
 
-| Class | Prior mean | Prior SD |
-|---|---|---|
-| `cv.glmnet` / `glmnet` | Non-zero coefficients | `multiplier × |coef|` (floor: `min_sd`) |
-| `lm` | Coefficient estimates | `multiplier × SE` (floor: `min_sd`) |
-| `glm` | Coefficient estimates | `multiplier × SE` (floor: `min_sd`) |
-| `ranger` | Zero (direction unknown) | `multiplier × normalised_importance` |
+| Class | Prior mean (`shrinkage = "zero"`, default) | Prior mean (`shrinkage = "estimate"`) | Prior SD |
+|---|---|---|---|
+| `cv.glmnet` / `glmnet` | `0` (for non-zero coefs) | Non-zero coefficients | `multiplier × |coef|` (floor: `min_sd`) |
+| `lm` | `0` | Coefficient estimates | `multiplier × |coef|` (`"zero"`) or `multiplier × SE` (`"estimate"`, floor: `min_sd`) |
+| `glm` | `0` | Coefficient estimates | `multiplier × |coef|` (`"zero"`) or `multiplier × SE` (`"estimate"`, floor: `min_sd`) |
+| `ranger` (experimental) | `0` (direction unknown) | `0` (direction unknown) | `multiplier × normalised_importance` (floor: `min_sd`) |
 
-For `ranger`, only variables with positive permutation importance are included. Because random forests do not produce signed coefficients, priors are centered at zero and scaled by importance — encoding "this predictor matters" without a directional claim.
+For `ranger`, only variables with positive permutation importance are included. Because random forests do not produce signed coefficients or GLM-scale units, `extract_priors.ranger()` is experimental and centers priors at zero scaled by normalized importance.
 
-> **Note on centering:** The glmnet intercept is intentionally excluded from the prior — it reflects the centering of training data, which may not apply to new data. Center predictors upstream and document this in your analysis.
+> **Note on intercept handling:** The first-stage intercept is excluded from the coefficient priors, and `intercept_prior_sd = NULL` (default) lets `brms` use its data-aware default (`student_t(3, median(y), mad(y))`). Supplying a numeric `intercept_prior_sd` sets `normal(0, intercept_prior_sd)`, which is only appropriate when the response is centered.
 
 ---
 
@@ -183,7 +185,7 @@ spells out the four lines.
 
 ### Step 3 — Predict with uncertainty propagation
 
-`et_predict()` draws from the posterior predictive distribution, propagates environmental measurement noise through the model, and computes credible intervals.
+`et_predict()` draws from the posterior predictive distribution, propagates environmental measurement noise (or pathwise driver ensembles via `env_ensemble`) through the model, and computes credible intervals. By default (`seed = NULL`), predictions are seeded from the fitted model's own seed so results are reproducible from the model alone.
 
 ```r
 pred <- et_predict(
@@ -193,8 +195,7 @@ pred <- et_predict(
   # env_noise can also be a single fraction of each predictor's SD:
   # env_noise = 0.10   →  10% noise applied uniformly
   n_draws   = 2000L,
-  ci_levels = c(0.5, 0.8, 0.90, 0.95),
-  n_perturb = 500L    # draws used in the perturbation step; reduce for speed
+  ci_levels = c(0.5, 0.8, 0.90, 0.95)
 )
 
 print(pred)
@@ -206,21 +207,23 @@ print(pred)
 #     Parameter    : 0.0412
 #     Environmental: 0.0083
 #     Residual     : 0.1204
-#     Total        : 0.1619
+#     Total        : 0.1699
 ```
 
 The returned `et_prediction` object contains:
 
 | Slot | Description |
 |---|---|
-| `posterior_predict` | `[n_draws × n_obs]` matrix — full posterior predictive draws |
-| `posterior_linpred` | `[n_draws × n_obs]` matrix — linear predictor draws (parameter uncertainty only) |
-| `lp_perturbed` | `[n_perturb × n_obs]` matrix — linear predictor under environmentally perturbed inputs |
-| `sigma_draws` | Numeric vector of posterior sigma draws |
+| `posterior_predict` | `[n_draws × n_obs]` matrix — unperturbed posterior predictive draws |
+| `posterior_linpred` | `[n_draws × n_obs]` matrix — linear predictor draws on the link scale (parameter uncertainty only) |
+| `lp_perturbed` | `[n_perturb × n_obs]` matrix — linear predictor on the link scale under environmentally perturbed inputs |
+| `predictive_draws` | `[n_draws × n_obs]` matrix — the predictive draws used for `credible_intervals`, `et_pit()`, and `et_skill_score()` (includes environmental uncertainty when `include_env_in_ci = TRUE`) |
+| `sigma_draws` | Numeric vector of posterior sigma draws (`NA` for families without sigma) |
 | `credible_intervals` | `data.frame` with columns `row_id, ci_level, lower, median, upper, width` |
-| `decomposition` | `data.frame` with `obs_id, param_var, env_var, residual_var, total_var` (plus `temporal_var` when the model carries an autocorrelation term) |
+| `decomposition` | `data.frame` with `obs_id, total_var, param_var, env_var, v_env_mcse, residual_var` (plus `group_var` for new random-effect levels, and `temporal_var` for autocorrelation models or `closure_gap` for iid ones) |
 | `newdata` | The input forecast data |
 | `model` | Reference to the source `et_model` |
+| `env_noise`, `env_cov`, `env_dist`, `env_ensemble` | Environmental perturbation / ensemble specifications used |
 
 ---
 
@@ -231,9 +234,9 @@ The returned `et_prediction` object contains:
 ```r
 decomp <- decompose_uncertainty(pred)
 head(decomp)
-#   obs_id param_var  env_var residual_var total_var
-# 1      1    0.0389  0.0071       0.1204    0.1601
-# 2      2    0.0441  0.0098       0.1204    0.1637
+#   obs_id total_var param_var env_var v_env_mcse residual_var closure_gap
+# 1      1    0.1665    0.0389  0.0071     0.0012       0.1204      0.0001
+# 2      2    0.1741    0.0441  0.0098     0.0015       0.1204     -0.0002
 # ...
 ```
 
@@ -241,12 +244,14 @@ head(decomp)
 
 | Component | Estimator |
 |---|---|
-| `param_var` | `Var[posterior_linpred]` across draws (population level when the model has group terms) — coefficient uncertainty |
+| `param_var` | `Var[μ]` across draws on the response scale (population level when predicting for new group levels) — coefficient uncertainty |
 | `group_var` | `Var` contributed by the group-level distribution — present **only** when predicting for a *new* level of a random effect (see below) |
-| `env_var` | `Var[lp_perturbed] − Var[lp_unperturbed]` — additional variance from predictor noise |
-| `residual_var` | `E[σ²]` across posterior draws — biological process noise |
-| `temporal_var` | autocorrelation-induced accumulation, present only for models carrying a correlation term |
-| `total_var` | **`Var[posterior_predict]`**, the measured spread of the draws the credible interval is read from |
+| `env_var` | `Var[μ_perturbed] − Var[μ_unperturbed]` — additional response-scale variance from predictor noise |
+| `v_env_mcse` | Monte Carlo standard error of `env_var` |
+| `residual_var` | `E[V(μ)]` across posterior draws (`E[σ²]` for Gaussian) — biological process noise |
+| `temporal_var` | Signed remainder `total_var − (param_var + env_var + residual_var)` — autocorrelation-induced accumulation, present only for models carrying a correlation term |
+| `closure_gap` | Signed remainder `total_var − (param_var + env_var + residual_var)` for iid models — Monte Carlo closure check |
+| `total_var` | **`Var[pp_env]`**, the measured variance of the environmentally inclusive posterior predictive draws |
 
 Since 1.4.0 `total_var` is **measured**, not defined: it is `Var[posterior_predict]`, the spread of the distribution the reported interval is actually drawn from. For a model carrying a correlation term `temporal_var` is the remainder and the four channels account for it exactly; for an iid model the shortfall is returned as `closure_gap` rather than folded into a channel, because a gap much larger than the Monte Carlo error of its parts means a mis-estimated channel rather than noise. A budget whose total is *defined* as the sum of its parts cannot report when the parts fail to account for it. (Before 1.3.0 the total was computed independently and `env_var` sat outside it; 1.3.x then defined it as the component sum. Decomposition tables from either should be recomputed rather than compared.)
 
@@ -262,9 +267,9 @@ Since 1.4.0 `total_var` is **measured**, not defined: it is `Var[posterior_predi
 
 ```r
 # For arcsin-sqrt transformed responses, derive range from training data:
-#   plausible_range = range(train_df$z_diff)
+#   response_scale = range(train_df$z_diff)
 # For bounded responses, supply explicit bounds:
-#   plausible_range = c(lower, upper)
+#   response_scale = c(lower, upper)
 sl <- shelf_life(
   predictions              = pred,
   response_scale           = range(train_df$z_diff),  # defaults to the training range
@@ -278,11 +283,14 @@ sl <- shelf_life(
 
 print(sl)
 # ErrorTracer shelf life analysis
-#   Observations    : 24
-#   Plausible range : 2
-#   Informative     : 18 / 24
-#   Mean CI/range   : 0.847
-#   Max CI/range    : 1.231
+#   Observations     : 24
+#   Plausible range  : 2
+#   Threshold        : 1
+#   Informative      : 18 / 24
+#   Mean CI/range    : 0.847
+#   Max CI/range     : 1.231
+#   Shelf life       : ~2026 (observed -- threshold first exceeded)
+#   Detail           : Threshold (ratio >= 1) sustained (>= 2 consecutive periods) from 2026.
 
 as.data.frame(sl)
 #   obs_id  time ci_width plausible_range  ratio informative
@@ -437,6 +445,9 @@ et_plot_shelf_life(sl, show_ratio = TRUE)
 # Calibration: observed vs. nominal coverage (points on the 1:1 diagonal = well-calibrated)
 et_plot_calibration(cal)
 
+# PIT histogram: uniformity check with 95% consistency band (per-panel when grouped)
+et_plot_pit(pit)
+
 # Fan chart: nested CI ribbons with optional observed values overlaid
 et_plot_forecast(pred, observed = validation_df,
                  response_col = "z_diff", time_col = "year")
@@ -446,6 +457,12 @@ et_plot_prior_posterior(fit, max_preds = 8L)
 
 # Forest plot: Bayesian 95% CI (blue) vs. regularized coefficient (red ×)
 et_plot_coefficients(fit)
+
+# Sensitivity profile: how env_share, CI/range ratio, or horizon responds to noise scale
+sens <- et_sensitivity_profile(fit, newdata = forecast_df,
+                               response_scale = range(train_df$z_diff),
+                               time_col = "year")
+et_plot_sensitivity(sens, show = "env_share")
 ```
 
 ---
@@ -455,11 +472,13 @@ et_plot_coefficients(fit)
 | Class | Created by | Methods |
 |---|---|---|
 | `et_prior_spec` | `extract_priors()` | `print` |
-| `et_model` | `et_fit()` | `print`, `summary` |
+| `et_model` | `et_fit()`, `as_et_model()` | `print`, `summary` |
 | `et_model_list` | `et_fit(..., grouping = ...)` | `print`, `summary` |
 | `et_prediction` | `et_predict()` | `print` |
 | `et_prediction_list` | `et_predict()` on `et_model_list` | `print` |
 | `et_shelf_life` | `shelf_life()` | `print`, `summary` |
+| `et_sensitivity` | `et_sensitivity_profile()` | `print` |
+| `et_sobol` | `et_sobol()` | `print` |
 
 ---
 
@@ -552,7 +571,7 @@ pred_list <- et_predict(
 # Per-group decomposition and shelf life
 decomp_all <- decompose_uncertainty(pred_list)
 sl_all     <- shelf_life(pred_list,
-                         plausible_range          = range(train_df$z_diff),
+                         response_scale           = range(train_df$z_diff),
                          ci_level                 = 0.90,
                          time_col                 = "year",
                          max_extrapolation_factor = 10)
@@ -587,21 +606,29 @@ et_plot_shelf_life(sl_all) +
 ```
 ErrorTracer/
 ├── R/
-│   ├── priors.R      # extract_priors() — dispatch for glmnet, lm, glm, ranger
-│   ├── fit.R         # et_fit() — Bayesian model fitting via brms
-│   ├── predict.R     # et_predict() — posterior prediction with decomposition
-│   ├── decompose.R   # decompose_uncertainty() — param / env / residual split
-│   ├── shelf_life.R  # shelf_life() — forecast horizon analysis
-│   ├── calibrate.R   # et_calibrate(), et_diagnose()
-│   ├── plot.R        # et_plot_*() — six ggplot2 visualizations
-│   └── utils.R       # internal helpers (standardize, logging, etc.)
+│   ├── priors.R              # extract_priors() — dispatch for glmnet, lm, glm, ranger
+│   ├── priors_split.R        # et_priors_split() — disjoint prior/likelihood sample split
+│   ├── fit.R                 # et_fit(), as_et_model() — Bayesian fitting & brmsfit wrapping
+│   ├── predict.R             # et_predict() — posterior prediction with noise/ensemble propagation
+│   ├── decompose.R           # decompose_uncertainty() — param / group / env / residual / temporal split
+│   ├── sobol.R               # et_sobol() — global Sobol variance-based sensitivity indices
+│   ├── sensitivity.R         # et_sensitivity_profile() — noise-grid sensitivity profiling
+│   ├── shelf_life.R          # shelf_life() — forecast horizon analysis
+│   ├── shelf_life_rolling.R  # et_shelf_life_pool() — Kaplan-Meier pooling across forecast origins
+│   ├── skill.R               # et_skill_score() — null-model CRPS forecast skill & forecast limit
+│   ├── calibrate.R           # et_calibrate(), et_pit(), et_diagnose()
+│   ├── plot.R                # et_plot_*() — eight ggplot2 visualizations
+│   ├── data.R                # et_sim bundled dataset documentation
+│   └── utils.R               # standardize(), unstandardize(), et_theme(), internal helpers
+├── data/
+│   └── et_sim.rda            # bundled simulated multi-cluster time-series dataset
 ├── tests/
 │   └── testthat/
 ├── vignettes/
-│   ├── genomics.Rmd  # Drosophila allele frequency example
-│   └── ecology.Rmd   # Phenology / species abundance example
+│   ├── introduction.Rmd      # Getting Started with ErrorTracer (full pipeline tutorial)
+│   └── worked_example.Rmd    # A one-predictor worked example (companion to Box 1)
 ├── DESCRIPTION
-├── NAMESPACE
+└── NAMESPACE
 ```
 
 ---
@@ -613,21 +640,23 @@ ErrorTracer/
 | Package | Version | Purpose |
 |---|---|---|
 | `brms` | >= 2.20.0 | Bayesian regression via Stan |
-| `loo` | >= 2.6.0 | LOO cross-validation |
-| `bayesplot` | >= 1.10.0 | Posterior predictive checks |
 | `ggplot2` | >= 3.4.0 | Visualization |
-| `tidyr` | >= 1.3.0 | Data reshaping |
-| `rlang` | >= 1.1.0 | Tidy evaluation |
+| `rlang` | >= 1.1.0 | Tidy evaluation (`.data` pronoun) |
+| `stats`, `utils` | base R | Statistical functions and utilities |
 
 **Suggests** (install separately as needed):
 
-| Package | Purpose |
-|---|---|
-| `glmnet` | Elastic net / lasso prior extraction |
-| `ranger` | Random forest prior extraction |
-| `dplyr` | Data manipulation in vignettes |
-| `testthat` | Unit testing |
-| `knitr`, `rmarkdown` | Vignette building |
+| Package | Version | Purpose |
+|---|---|---|
+| `glmnet` | >= 4.1.0 | Elastic net / lasso prior extraction |
+| `ranger` | >= 0.15.0 | Random forest prior extraction (experimental) |
+| `survival` | — | Kaplan–Meier estimation in `et_shelf_life_pool()` |
+| `loo` | >= 2.6.0 | LOO cross-validation in `et_diagnose()` |
+| `bayesplot` | >= 1.10.0 | Posterior predictive checks |
+| `scales` | >= 1.3.0 | Percentage axis formatting in `et_plot_sensitivity()` |
+| `tidyr`, `dplyr` | >= 1.3.0 / >= 1.1.0 | Data manipulation in vignettes |
+| `testthat`, `covr` | >= 3.0.0 | Unit testing and coverage |
+| `knitr`, `rmarkdown` | — | Vignette building |
 
 **Backend** (required; install separately):
 - `cmdstanr` (recommended) or `rstan`
@@ -637,10 +666,10 @@ ErrorTracer/
 ## Caveats and Limitations
 
 - **Small-n regime:** When `n < 10` observations, informed priors from `extract_priors()` dominate the posterior. This is the setting where the enet→prior pipeline provides the most value, but is also most sensitive to prior misspecification. Document prior choices carefully.
-- **Intercept handling:** The glmnet intercept is excluded from the prior by default, as it reflects upstream centering of training data. If your data is not pre-centered, verify that the intercept prior (default `Normal(0, 2.5)`) is appropriate.
-- **Environmental uncertainty is inside the total:** `env_var` is estimated by perturbation and is a component *of* `total_var`, which since 1.4.0 is the measured `Var[posterior_predict]`. Releases before 1.3.0 reported `env_var` outside the total, and 1.3.x defined the total as the component sum; decomposition tables from either should be recomputed rather than compared.
+- **Intercept handling:** The first-stage intercept is excluded from the prior by default, and `intercept_prior_sd = NULL` lets `brms` use its data-aware default (`student_t(3, median(y), mad(y))`). Supplying a numeric `intercept_prior_sd` sets `Normal(0, intercept_prior_sd)`, which is only appropriate when the response is pre-centered.
+- **Environmental uncertainty is inside the total:** `env_var` is estimated by perturbation and is a component *of* `total_var`, which since 1.4.0 is the measured `Var[posterior_predict]` (on the environmentally inclusive draws). Releases before 1.3.0 reported `env_var` outside the total, and 1.3.x defined the total as the component sum; decomposition tables from either should be recomputed rather than compared.
 - **Predictions made before 1.4.1 are not reproducible:** `et_predict()` drew from the ambient random stream, so its intervals, PIT, calibration and shelf life depended on what had used that stream earlier in the session. It now seeds its draws from the model's own seed by default (`seed =` to override, `seed = NA` to opt out).
-- **`ranger` priors are undirected:** Because random forests provide no signed coefficients, ranger-derived priors are centered at zero. This is conservative but avoids false directional assumptions.
+- **`ranger` priors are experimental and undirected:** Because random forests provide no signed coefficients or GLM-scale units, ranger-derived priors are centered at zero with heuristic importance-based SDs. Prefer `glmnet`/`lm`/`glm` for a principled prior.
 
 ---
 

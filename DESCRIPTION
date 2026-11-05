@@ -2,25 +2,27 @@ Package: ErrorTracer
 Type: Package
 Title: Bayesian Error Propagation and Forecast Uncertainty Decomposition
 Version: 1.4.2
-Date: 2026-10-29
+Date: 2026-11-05
 Authors@R: c(
     person(given = "Luis Javier", family = "Madrigal-Roca", role = c("aut", "cre"), email = "madrigalrocalj@yahoo.com"),
     person(given = "John", family = "Kelly", role = "aut", email = "jkk@ku.edu")
   )
 Description: Provides a full pipeline from regularized or standard regression
     models (elastic net, linear models, generalized linear models, random
-    forests) to informed Bayesian priors, structured forecast uncertainty
-    decomposition (parameter / environmental / residual, plus a temporal
-    component when the model carries an autocorrelation term), and forecast
-    shelf life analysis (the quantification of when a forecast becomes
-    uninformative). Designed for ecological and genomic forecasting with
-    climate or environmental covariates. Methods build on Bürkner (2017)
-    <doi:10.18637/jss.v080.i01> for Bayesian regression via 'Stan',
-    Friedman, Hastie, and Tibshirani (2010) <doi:10.18637/jss.v033.i01>
-    for elastic net regularization, Wright and Ziegler (2017)
-    <doi:10.18637/jss.v077.i01> for random forests, and Vehtari, Gelman,
-    and Gabry (2017) <doi:10.1007/s11222-016-9696-4> for leave-one-out
-    cross-validation.
+    forests) to informed Bayesian priors, or accepts an existing 'brms' fit
+    directly, for structured forecast uncertainty decomposition (parameter /
+    environmental / residual, plus group-level variance for new random-effect
+    levels and a temporal component under autocorrelation, alongside global
+    Sobol indices), forecast shelf life analysis (quantifying when a forecast
+    becomes uninformative, with Kaplan-Meier pooling across forecast origins),
+    null-model skill scoring, and calibration diagnostics. Designed for
+    ecological and genomic forecasting with climate or environmental
+    covariates. Methods build on Bürkner (2017) <doi:10.18637/jss.v080.i01>
+    for Bayesian regression via 'Stan', Friedman, Hastie, and Tibshirani
+    (2010) <doi:10.18637/jss.v033.i01> for elastic net regularization,
+    Wright and Ziegler (2017) <doi:10.18637/jss.v077.i01> for random forests,
+    and Vehtari, Gelman, and Gabry (2017) <doi:10.1007/s11222-016-9696-4>
+    for leave-one-out cross-validation.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true

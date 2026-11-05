@@ -194,3 +194,55 @@ test_that("et_plot_shelf_life draws in both placements", {
   sl$ratio <- rep(1.02, 6)
   expect_s3_class(et_plot_shelf_life(sl), "ggplot")
 })
+
+test_that("proportional shares sum to exactly 1 and exclude the gap", {
+  skip_if_not_installed("ggplot2")
+  # Shares are normalised by the channels drawn, not by total_var: dividing by
+  # total_var left iid bars short of 1 by the closure gap (up to 13% on a real
+  # forecast) on an axis labelled "share". The gap stays auditable in the
+  # decomposition rather than being drawn as a bar.
+  set.seed(3)
+  n <- 8L
+  d <- data.frame(obs_id       = seq_len(n),
+                  param_var    = runif(n, 0.01, 0.05),
+                  env_var      = runif(n, 0.01, 0.03),
+                  residual_var = runif(n, 0.50, 0.90))
+  expl           <- d$param_var + d$env_var + d$residual_var
+  d$total_var    <- expl + rnorm(n, 0, 0.04)   # signed, both directions
+  d$closure_gap  <- d$total_var - expl
+  expect_true(any(d$closure_gap < 0))          # the hard case is covered
+
+  p   <- suppressMessages(et_plot_decomposition(d, proportional = TRUE))
+  net <- tapply(p$data$value, p$data$obs_id, sum)
+  expect_equal(as.numeric(net), rep(1, n), tolerance = 1e-12)
+  expect_false("Closure gap" %in% p$data$component)
+  expect_setequal(unique(p$data$component),
+                  c("Parameter", "Environmental", "Residual"))
+
+  # the AR case is exhaustive through temporal_var instead
+  d2 <- d
+  d2$closure_gap  <- NULL
+  d2$temporal_var <- d$closure_gap
+  p2   <- suppressMessages(et_plot_decomposition(d2, proportional = TRUE))
+  net2 <- tapply(p2$data$value, p2$data$obs_id, sum)
+  expect_equal(as.numeric(net2), rep(1, n), tolerance = 1e-12)
+})
+
+test_that("grouped shares sum to 1 and long group labels are angled", {
+  skip_if_not_installed("ggplot2")
+  set.seed(5)
+  g <- sprintf("2L_%d", 23358000 + seq_len(12) * 1117)   # long SNP-style ids
+  d <- data.frame(group        = rep(g, each = 2L),
+                  obs_id       = seq_len(24L),
+                  param_var    = runif(24, 0.05, 0.20),
+                  env_var      = 0,
+                  residual_var = runif(24, 0.50, 0.90))
+  d$total_var   <- d$param_var + d$env_var + d$residual_var + rnorm(24, 0, 0.03)
+  d$closure_gap <- d$total_var - (d$param_var + d$env_var + d$residual_var)
+
+  p   <- suppressMessages(
+    et_plot_decomposition(d, proportional = TRUE, group_col = "group"))
+  net <- tapply(p$data$value, p$data$group, sum)
+  expect_equal(as.numeric(net), rep(1, length(g)), tolerance = 1e-12)
+  expect_equal(p$theme$axis.text.x$angle, 45)
+})

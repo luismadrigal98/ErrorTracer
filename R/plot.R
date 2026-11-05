@@ -7,19 +7,30 @@
 #' Plot uncertainty decomposition
 #'
 #' Produces a stacked bar chart showing the relative contributions of
-#' parameter, environmental, and residual variance for each observation,
-#' plus a fourth temporal-autocorrelation component when present in
-#' \code{decomp} (see \code{\link{decompose_uncertainty}}).
+#' parameter, environmental, and residual variance for each observation, plus
+#' a temporal-autocorrelation component and a group component when those are
+#' present in \code{decomp} (see \code{\link{decompose_uncertainty}}).  The
+#' iid \code{closure_gap} is deliberately \emph{not} drawn: it is a
+#' diagnostic rather than a source of variance, and a grey remainder bar makes
+#' the figure harder to read for no interpretive gain.
 #'
 #' @param decomp A \code{data.frame} from \code{\link{decompose_uncertainty}}
 #'   or directly the \code{$decomposition} slot of an \code{et_prediction}.
 #' @param proportional Logical.  If \code{TRUE} (default), each component is
-#'   shown as a share of \code{total_var} (the measured predictive variance).
-#'   Shares therefore sum to 1 exactly for autocorrelation models and to within
-#'   Monte Carlo error for iid ones, where the shortfall is the
-#'   \code{closure_gap} column.  If \code{FALSE}, raw variances are shown.
-#'   Because \code{temporal_var} is signed, a negative component is drawn below
-#'   the zero line rather than silently clamped.
+#'   shown as a share of the channels drawn, so every bar sums to exactly 1
+#'   and the y axis is a true proportion (labelled as a percentage).  For an
+#'   autocorrelation model that denominator \emph{is} \code{total_var},
+#'   because \code{temporal_var} is the remainder against it.  For an iid
+#'   model the named channels fall short of \code{total_var} by
+#'   \code{closure_gap}, so the bars are shares of the decomposed variance
+#'   rather than of the measured total; the gap is reported in the
+#'   decomposition and by \code{print()}, and a material one raises an
+#'   informational message naming its mean and maximum.  Normalising by
+#'   \code{total_var} instead would leave iid bars visibly short of 1 on an
+#'   axis labelled "share", which reads as a plotting fault.  If
+#'   \code{FALSE}, raw variances are shown.  \code{temporal_var} is signed,
+#'   so a negative component is drawn below the zero line rather than silently
+#'   clamped.
 #' @param group_col Character.  Optional name of a grouping column in
 #'   \code{decomp} (present for grouped predictions).  One bar is drawn per
 #'   group: the components are summed over the group's observations and
@@ -58,25 +69,53 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
     decomp           <- agg
   }
 
-  # Normalise against the MEASURED total rather than against the component sum.
-  # position = "fill" would divide by the sum of the plotted components, which
-  # (a) hides the iid closure gap by rescaling it away and (b) is meaningless
-  # once a component can be negative. Dividing by total_var keeps the y axis
-  # interpretable as "share of predictive variance" in every case.
-  if (proportional && "total_var" %in% colnames(decomp)) {
-    denom <- decomp[["total_var"]]
+  # Normalise against the sum of the channels actually drawn, so the bars are
+  # true proportions and reach exactly 1. Dividing by total_var instead leaves
+  # iid bars short by the closure gap (up to ~13% on real forecasts), which
+  # reads as a plotting error on an axis labelled "share". For an
+  # autocorrelation model the two denominators are identical, because
+  # temporal_var is defined as the remainder against total_var.
+  #
+  # The gap is not swept under the rug, it is just not a bar: it stays in the
+  # decomposition as closure_gap, print()/summary() report it, and a material
+  # one is flagged below. That keeps the figure readable and the accounting
+  # auditable, which are different jobs.
+  gap_note <- NULL
+  if (proportional) {
+    denom <- rowSums(as.data.frame(decomp[components]), na.rm = TRUE)
+    if ("total_var" %in% colnames(decomp)) {
+      tv <- decomp[["total_var"]]
+      ok <- is.finite(tv) & tv > 0
+      if (any(ok)) {
+        gap <- (tv[ok] - denom[ok]) / tv[ok]
+        if (abs(mean(gap)) > 0.01 || max(abs(gap)) > 0.05) {
+          gap_note <- sprintf(
+            paste0("The drawn channels do not account for the measured ",
+                   "total_var: mean %+.1f%%, max |%.1f%%|. Bars are shares of ",
+                   "the channels shown, not of total_var. Inspect closure_gap ",
+                   "in the decomposition; a non-zero MEAN means a channel is ",
+                   "mis-estimated, while scatter around zero is Monte Carlo ",
+                   "error."),
+            100 * mean(gap), 100 * max(abs(gap)))
+        }
+      }
+    }
     denom[!is.finite(denom) | denom <= 0] <- NA_real_
     for (cc in components) decomp[[cc]] <- decomp[[cc]] / denom
   }
+  if (!is.null(gap_note)) .et_info(gap_note)
 
   long <- .pivot_decomp(decomp, components)
 
   has_negative <- any(long[["value"]] < 0, na.rm = TRUE)
   if (has_negative) {
-    .et_info("A variance component is negative (temporal_var is a signed ",
-             "covariance term); it is drawn below the zero line. A negative ",
-             "temporal_var of the same order as v_env_mcse is Monte Carlo ",
-             "noise rather than a real reduction in predictive variance.")
+    .et_info("A variance component is negative and is drawn below the zero ",
+             "line: temporal_var is a signed covariance term, and closure_gap ",
+             "is a signed remainder that goes negative whenever the named ",
+             "channels over-explain the measured total. Either one at the ",
+             "scale of ordinary Monte Carlo error on a variance (a few per ",
+             "cent of total_var) is noise, not a real reduction in ",
+             "predictive variance.")
   }
 
   x_col <- if (!is.null(group_col) && group_col %in% colnames(decomp)) {
@@ -106,9 +145,18 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
     ) +
     et_theme()
 
-  # Angled ticks earn their place for a long run of observation ids; for a
-  # handful of group names they are just harder to read.
-  if (x_col == "obs_id") {
+  if (proportional) {
+    p <- p + ggplot2::scale_y_continuous(labels = scales_percent_safe)
+  }
+
+  # Angle the ticks when the labels would otherwise collide. The old rule keyed
+  # on x_col == "obs_id", which left grouped plots horizontal however long the
+  # group names were -- twenty SNP ids on one axis overprinted into an
+  # unreadable band. Decide on the labels themselves instead.
+  x_labs  <- as.character(unique(long[[x_col]]))
+  crowded <- length(x_labs) > 8L ||
+             (length(x_labs) > 3L && max(nchar(x_labs), 0L) > 6L)
+  if (crowded) {
     p <- p + ggplot2::theme(
       axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
   }
@@ -415,7 +463,9 @@ et_plot_forecast <- function(predictions, observed = NULL,
 #' Overlays prior and posterior density for each predictor coefficient,
 #' visualising how much the data update the priors.
 #'
-#' @param model An \code{et_model} object.
+#' @param model An \code{et_model} object with a non-\code{NULL}
+#'   \code{prior_spec} (from \code{\link{et_fit}} or
+#'   \code{\link{as_et_model}}).
 #' @param max_preds Integer.  Maximum number of predictors to show
 #'   (default 8).  Predictors are shown in the order they appear in the
 #'   prior specification.
@@ -491,8 +541,9 @@ et_plot_prior_posterior <- function(model, max_preds = 8L,
 
 #' Forest plot of regression coefficients
 #'
-#' Compares Bayesian posterior estimates (95\% CI) with the regularized
-#' coefficient values used as prior means (shown as crosses).
+#' Compares Bayesian posterior estimates (95\% CI) with the regularized or
+#' first-stage coefficient estimates stored in the prior specification (shown
+#' as crosses).
 #'
 #' @param model An \code{et_model} or \code{et_model_list}.
 #' @return A \code{ggplot2} object.

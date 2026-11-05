@@ -43,7 +43,7 @@
 #'
 #' @return A list with:
 #'   \describe{
-#'     \item{priors}{The \code{et_priors} object from the prior-stage rows.}
+#'     \item{priors}{The \code{et_prior_spec} object from the prior-stage rows.}
 #'     \item{fit_data}{Rows to pass to \code{\link{et_fit}} --- disjoint from
 #'       the rows used to build the priors.}
 #'     \item{prior_data}{Rows used for the first stage, returned so the split is

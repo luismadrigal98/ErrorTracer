@@ -25,7 +25,9 @@ the variance accounting. Bare Stan objects are refused with the
 carry neither the family, the formula, nor the training data the decomposition
 reads.
 
-Two changes to plot output. `et_plot_*()` no longer sets a default title: these figures are made for manuscripts, where the caption is typeset by the journal, and a title in the image duplicates it. Axis labels, legend titles and facet strips are unchanged, and a title is still available through `+ labs(title = )`.
+Three changes to plot output. `et_plot_decomposition(proportional = TRUE)` now normalises each component by the channels actually drawn, so the bars are true shares summing to 1 and the axis is a percentage; previously it divided by `total_var` while drawing only the named channels, which left iid bars short of 1 by the closure gap. Tick labels are now angled based on the labels themselves rather than on the x variable, so long group names no longer collide.
+
+Two further changes to plot output. `et_plot_*()` no longer sets a default title: these figures are made for manuscripts, where the caption is typeset by the journal, and a title in the image duplicates it. Axis labels, legend titles and facet strips are unchanged, and a title is still available through `+ labs(title = )`.
 
 It also fixes a faceting defect in `et_plot_pit()`: the dashed uniform line
 and the 95% consistency band were computed once from the mean group size and

@@ -52,7 +52,7 @@ fit <- et_fit(y ~ x1, data = df,
               cores = 1, refresh = 0)
 valid_df <- data.frame(y = rnorm(5), x1 = rnorm(5))
 pred <- et_predict(fit, newdata = valid_df,
-                   n_draws = 200, n_perturb = 50)
+                   n_draws = 200)
 cal <- et_calibrate(pred, observed = valid_df, response_col = "y")
 print(cal)
 }

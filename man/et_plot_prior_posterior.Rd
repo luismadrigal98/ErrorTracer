@@ -7,7 +7,9 @@
 et_plot_prior_posterior(model, max_preds = 8L, n_prior_draws = 4000L)
 }
 \arguments{
-\item{model}{An \code{et_model} object.}
+\item{model}{An \code{et_model} object with a non-\code{NULL}
+\code{prior_spec} (from \code{\link{et_fit}} or
+\code{\link{as_et_model}}).}
 
 \item{max_preds}{Integer.  Maximum number of predictors to show
 (default 8).  Predictors are shown in the order they appear in the

@@ -7,7 +7,8 @@
 et_diagnose(model, loo = TRUE, ...)
 }
 \arguments{
-\item{model}{An \code{et_model} or \code{et_model_list}.}
+\item{model}{An \code{et_model}, \code{et_model_list}, or \code{brmsfit}
+object.}
 
 \item{loo}{Logical.  Whether to run LOO-CV (can be slow; default
 \code{TRUE}).}

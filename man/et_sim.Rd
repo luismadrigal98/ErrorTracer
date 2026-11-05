@@ -8,8 +8,8 @@
 A named \code{list} with seven elements:
 \describe{
   \item{\code{train}}{
-    \code{data.frame} with 100 rows and 6 columns (2 clusters \eqn{\times}
-    50 training years, 1970–2019):
+    \code{data.frame} with 200 rows and 16 columns (2 clusters \eqn{\times}
+    100 training years, 1920–2019):
     \describe{
       \item{year}{Integer. Calendar year.}
       \item{cluster_id}{Character. SNP cluster identifier: \code{"A"} or
@@ -23,13 +23,15 @@ A named \code{list} with seven elements:
       \item{z_diff}{Numeric. Simulated allele-frequency change on the
         arcsin-sqrt scale (\eqn{\arcsin(\sqrt{f})} transformation).
         This transformation is unbounded and has no fixed
-        [\eqn{-1}, 1] constraint; the plausible range should be derived
+        [\eqn{-1}, 1] constraint; the response scale should be derived
         from the training data or from the theoretical bounds
         (\eqn{[0,\, \pi/2]}\ on the arcsin scale).}
+      \item{d1, \dots, d10}{Numeric. Ten independent standardised nuisance
+        predictors with zero true effect on \code{z_diff}.}
     }
   }
   \item{\code{forecast}}{
-    \code{data.frame} with 30 rows and 5 columns (2 clusters \eqn{\times}
+    \code{data.frame} with 30 rows and 15 columns (2 clusters \eqn{\times}
     15 forecast years, 2020–2034).  Same columns as \code{train} except
     \code{z_diff} is absent — these are the prediction targets.  Predictors
     are standardised using the training-period statistics stored in
@@ -54,10 +56,11 @@ A named \code{list} with seven elements:
     }
   }
   \item{\code{env_noise}}{
-    Named \code{list}.  Suggested per-predictor environmental noise SDs (on
-    the standardised scale) for use with the \code{env_noise} argument of
-    \code{\link{et_predict}}: \code{Tmean = 0.30}, \code{PPT = 0.20},
-    \code{SWE = 0.15}.
+    Named \code{list} of length 13.  Suggested per-predictor environmental
+    noise SDs (on the standardised scale) for use with the \code{env_noise}
+    argument of \code{\link{et_predict}}: \code{Tmean = 0.30},
+    \code{PPT = 0.20}, \code{SWE = 0.15}, and \code{0} for each of
+    \code{d1}, \dots, \code{d10}.
   }
   \item{\code{standardization}}{
     Named \code{list} with one element per predictor.  Each element is a

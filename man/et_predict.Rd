@@ -24,7 +24,8 @@ et_predict(
 }
 \arguments{
 \item{model}{An \code{et_model} or \code{et_model_list} object from
-\code{\link{et_fit}}.}
+\code{\link{et_fit}}, or a \code{brmsfit} object (which is passed through
+\code{\link{as_et_model}}).}
 
 \item{newdata}{A \code{data.frame} containing the predictor columns
 named in the model formula.  For grouped models, must also contain
@@ -240,34 +241,47 @@ groups neither share a perturbation stream nor stop being reproducible.}
 \value{
 An \code{et_prediction} object (list) containing:
 \describe{
-  \item{\code{posterior_predict}}{Matrix \code{[n_draws x n_obs]}: full
-    posterior predictive draws (parameter + residual uncertainty).}
+  \item{\code{posterior_predict}}{Matrix \code{[n_draws x n_obs]}:
+    unperturbed posterior predictive draws (parameter + residual
+    uncertainty).}
   \item{\code{posterior_linpred}}{Matrix \code{[n_draws x n_obs]}: linear
     predictor draws on the \strong{link scale} (parameter uncertainty only).}
   \item{\code{lp_perturbed}}{Matrix \code{[n_perturb x n_obs]}: linear
     predictor on the link scale computed on environmentally perturbed inputs.}
+  \item{\code{predictive_draws}}{Matrix \code{[n_draws x n_obs]}: the
+    posterior predictive draws from which \code{credible_intervals},
+    \code{\link{et_pit}}, and \code{\link{et_skill_score}} are computed
+    (includes environmental uncertainty when \code{include_env_in_ci} is
+    \code{TRUE}).}
   \item{\code{sigma_draws}}{Numeric vector: posterior draws of sigma
     (\code{NA} for families without a sigma parameter, e.g.\ Binomial).}
   \item{\code{credible_intervals}}{data.frame with columns
     \code{row_id, ci_level, lower, median, upper, width}.}
   \item{\code{decomposition}}{data.frame with columns
     \code{obs_id, total_var, param_var, env_var, v_env_mcse, residual_var},
-    plus \code{temporal_var} for autocorrelation models or
-    \code{closure_gap} for iid ones.
+    plus \code{group_var} when predicting for new random-effect levels, and
+    \code{temporal_var} for autocorrelation models or \code{closure_gap} for
+    iid ones.
     All components are on the \strong{response scale}.
     \code{total_var} is the \strong{measured} variance of the env-inclusive
     predictive draws, not the sum of the channels; see
     \code{\link{decompose_uncertainty}}.
     \code{v_env_mcse} is the Monte Carlo SE of \code{env_var}.
     \code{residual_var} is per-observation for non-Gaussian families
-    (e.g.\ Binomial: \eqn{E_s[\mu^{(s)}(1-\mu^{(s)})]}) and constant
+    (e.g.\ Binomial: \eqn{E_s[n \mu^{(s)}(1-\mu^{(s)})]}) and constant
     for Gaussian.}
   \item{\code{newdata}}{The input \code{newdata}.}
   \item{\code{model}}{Reference to the \code{et_model} used.}
+  \item{\code{env_noise}}{The \code{env_noise} specification supplied.}
   \item{\code{env_cov}}{The \eqn{p \times p} correlation matrix actually
     used for perturbation (identity for \code{env_cov = NULL}).}
   \item{\code{env_dist}}{Named character vector mapping each predictor to
     the distribution actually used for its perturbation.}
+  \item{\code{env_ensemble}}{Summary list (\code{n_scenarios},
+    \code{drivers}) when \code{env_ensemble} was supplied, otherwise
+    \code{NULL}.}
+  \item{\code{n_draws}, \code{n_perturb}, \code{interval_type},
+    \code{include_env_in_ci}}{Effective draw counts and interval settings.}
 }
 }
 \description{

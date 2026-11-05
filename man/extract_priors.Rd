@@ -81,18 +81,21 @@ extract_priors(
 }}
 
 \item{multiplier}{Numeric scalar.  Prior SD is set to
-\code{multiplier * |coef|} (for signed-coefficient methods) or
-\code{multiplier * importance_normalised} (for ranger).  Default 2.0.}
+\code{multiplier * |coef|} under the default \code{shrinkage = "zero"}
+(or for \code{glmnet}), \code{multiplier * SE} for \code{lm}/\code{glm}
+when \code{shrinkage = "estimate"}, and
+\code{multiplier * importance_normalised} for \code{ranger}.  Default 2.0.}
 
 \item{min_sd}{Numeric scalar.  Minimum prior SD to avoid degenerate
 (spike) priors on near-zero coefficients.  Default 0.1.}
 
 \item{shrinkage}{Character.  Sets the prior \emph{mean}: \code{"zero"}
 (default) centres every coefficient prior at 0 (a regularizing prior with
-a data-informed scale but no reused location); \code{"estimate"} uses the
-fitted coefficient as the prior mean (informative, but reuses the data ---
-see the double-use note above).  For \code{ranger} the mean is always 0
-(no signed coefficients), so \code{shrinkage} has no effect.}
+a data-informed scale \code{multiplier * |coef|} but no reused location);
+\code{"estimate"} uses the fitted coefficient as the prior mean
+(informative, but reuses the data --- see the double-use note above).
+For \code{ranger} the mean is always 0 (no signed coefficients), so
+\code{shrinkage} has no effect.}
 
 \item{intercept_prior_sd}{Optional prior SD for the intercept term.  The
 default \code{NULL} emits \emph{no} explicit intercept prior and lets
@@ -124,10 +127,11 @@ An \code{et_prior_spec} list containing:
   \describe{
     \item{\code{prior}}{A \code{brmsprior} object for use in \code{brms::brm()}.}
     \item{\code{pred_names}}{Character vector of included predictor names.}
-    \item{\code{coefs}}{Named numeric vector of regularized coefficients
-      (NULL for ranger, which uses importance instead).}
+    \item{\code{coefs}}{Named numeric vector of first-stage coefficients
+      (\code{NULL} for \code{ranger}, which uses importance instead).}
     \item{\code{method}}{Character: the dispatch method used.}
-    \item{\code{multiplier}, \code{min_sd}}{Settings echo.}
+    \item{\code{multiplier}, \code{min_sd}, \code{shrinkage},
+      \code{intercept_prior_sd}, \code{sigma_prior_scale}}{Settings echo.}
   }
 }
 \description{

@@ -43,7 +43,7 @@
 #'               cores = 1, refresh = 0)
 #' valid_df <- data.frame(y = rnorm(5), x1 = rnorm(5))
 #' pred <- et_predict(fit, newdata = valid_df,
-#'                    n_draws = 200, n_perturb = 50)
+#'                    n_draws = 200)
 #' cal <- et_calibrate(pred, observed = valid_df, response_col = "y")
 #' print(cal)
 #' }
@@ -239,7 +239,8 @@ et_pit.et_prediction_list <- function(predictions, observed, response_col = NULL
 #' Computes Rhat, effective sample size ratios, divergent transitions, and
 #' leave-one-out cross-validation (LOO-CV) for a fitted \code{et_model}.
 #'
-#' @param model An \code{et_model} or \code{et_model_list}.
+#' @param model An \code{et_model}, \code{et_model_list}, or \code{brmsfit}
+#'   object.
 #' @param loo Logical.  Whether to run LOO-CV (can be slow; default
 #'   \code{TRUE}).
 #' @param ... Unused.

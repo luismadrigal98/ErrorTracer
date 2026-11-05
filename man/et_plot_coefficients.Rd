@@ -13,6 +13,7 @@ et_plot_coefficients(model)
 A \code{ggplot2} object.
 }
 \description{
-Compares Bayesian posterior estimates (95\% CI) with the regularized
-coefficient values used as prior means (shown as crosses).
+Compares Bayesian posterior estimates (95\% CI) with the regularized or
+first-stage coefficient estimates stored in the prior specification (shown
+as crosses).
 }

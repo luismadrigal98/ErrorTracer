@@ -80,10 +80,14 @@ everything below should recover something close to this.
 # Stage 1: turn a quick frequentist fit into a prior
 
 `extract_priors()` is the bridge from a "fast, regularized" world to
-a "slow, Bayesian" world. The recipe is the same for `lm`, `glm`,
-`cv.glmnet`, and `ranger`: take the point estimate (or coefficient)
-as the prior mean and scale the prior SD by the standard error
-(or by the regularised coefficient magnitude, for `glmnet`).
+a "slow, Bayesian" world. The recipe works for `lm`, `glm`,
+`cv.glmnet`, and `ranger`: with the default `shrinkage = "zero"`, it
+centres the prior at zero and scales the prior SD by the coefficient
+magnitude (`multiplier * |coef|`, floored at `min_sd`), avoiding
+prior/likelihood double-use of the point estimate; with
+`shrinkage = "estimate"`, it centres the prior at the point estimate
+and scales the SD by the standard error (or by the regularised
+coefficient magnitude, for `glmnet`).
 
 ```{r}
 lm_fit  <- lm(y ~ x, data = train)
@@ -92,18 +96,21 @@ priors  <- extract_priors(lm_fit, multiplier = 2.0, min_sd = 0.1)
 priors
 ```
 
-Concretely, with $m = 2$ (the `multiplier` default) and
-$\sigma_{\min} = 0.1$, the prior on $\beta$ is
+Concretely, with $m = 2$ (the `multiplier` default),
+$\sigma_{\min} = 0.1$, and `shrinkage = "zero"`, the regularising
+prior on $\beta$ is
 
 $$
-\beta \sim \mathcal{N}\!\left(\hat\beta_{\text{lm}},
-                              \bigl[\max(2 \cdot \mathrm{SE},\,
-                                         \sigma_{\min})\bigr]^2\right).
+\beta \sim \mathcal{N}\!\left(0,
+                              \bigl[\max(2 \cdot |\hat\beta_{\text{lm}}|,\,
+                                         \sigma_{\min})\bigr]^2\right)
 $$
 
-For our simulated data, $\hat\beta_{\text{lm}} \approx 4.02$ with
-$\mathrm{SE} \approx 0.39$, so the prior is roughly
-$\mathcal{N}(4.02, 0.79^2)$.
+(or, with `shrinkage = "estimate"`,
+$\mathcal{N}(\hat\beta_{\text{lm}}, [\max(2\cdot\mathrm{SE}, \sigma_{\min})]^2)$).
+For our simulated data, $\hat\beta_{\text{lm}} \approx 4.60$ with
+$\mathrm{SE} \approx 0.53$, so the wide regularising prior leaves the
+likelihood free to locate $\beta$ while bounding its scale.
 
 # Stage 2: Bayesian refit with the informed prior
 
@@ -162,20 +169,21 @@ pred <- et_predict(
   newdata           = forecast_df,
   env_noise         = list(x = 0.3),
   n_draws           = 2000L,
-  n_perturb         = 500L,
   ci_levels         = 0.90,
   include_env_in_ci = TRUE
 )
 ```
 
-Setting `include_env_in_ci = TRUE` folds the environmental noise into
-the reported credible intervals. With it `FALSE` (the default), the CI
-captures parameter + residual uncertainty only; environmental
-variance is still reported separately in `decompose_uncertainty()`,
-but the user-facing CI is "what would the response be if we knew the
-future temperature exactly". The choice depends on whether you're
-forecasting *under* projection uncertainty or *given* a known
-driver.
+With `include_env_in_ci = TRUE` (which is also the automatic default
+when `include_env_in_ci = NULL` and non-zero `env_noise` is supplied),
+environmental noise is folded into the reported credible intervals so
+they stay coherent with `total_var`. Passing `include_env_in_ci = FALSE`
+restricts the user-facing CI to parameter + residual uncertainty only
+("what would the response be if we knew the future temperature
+exactly"), while still reporting `env_var` and the env-inclusive
+`total_var` in `decompose_uncertainty()`. The choice depends on
+whether you're forecasting *under* projection uncertainty or *given* a
+known driver.
 
 # Stage 4: decompose the variance over time
 
