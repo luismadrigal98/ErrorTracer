@@ -1,3 +1,33 @@
+# ErrorTracer 1.4.3
+
+Makes the variance budget as tight as the fit allows.
+
+## Changes to default behaviour
+
+* **`et_predict(n_draws =)` now defaults to every draw in the fit**, not to
+  2000. This matters more than it sounds. Since 1.4.0 `total_var` is the
+  *measured* variance of the predictive draws rather than the sum of the
+  channels, so for an iid model the `closure_gap` is exactly the Monte Carlo
+  error of that measurement. Subsampling a fit that already holds more draws
+  therefore widens the gap for no gain: the draws are paid for at sampling
+  time, and prediction is matrix work.
+
+  Measured on a 90-observation Gaussian fit, the per-observation gap has mean
+  zero throughout but its spread across observations falls from 4.0% of
+  `total_var` at 2000 draws to 1.2% at 8000. Reported component shares
+  consequently add to the measured total far more closely, and the credible
+  intervals, PIT values and shelf-life quantiles are all better resolved at
+  the same time, since they are computed from the same draws.
+
+  Pass an integer to bound memory on very wide `newdata`; it is still capped
+  at the draws available. An informational message fires when the draw matrix
+  would be large, naming `n_draws` as the knob.
+
+  **This changes reported numbers.** Any decomposition, interval, PIT,
+  calibration or shelf life produced with the old default is a noisier
+  estimate of the same quantity, not a different quantity, but it will not
+  reproduce exactly.
+
 # ErrorTracer 1.4.2
 
 Lets a model fitted outside the package enter the pipeline. Stages 1 and 2 are

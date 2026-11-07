@@ -1,9 +1,9 @@
 ## Summary
 
-This release (1.4.2) adds one feature and fixes a portability bug. The version
-on CRAN is 1.3.1, so this submission carries the 1.4.1 and 1.4.0 material as
-well; neither was submitted. The 1.4.2 changes come first, then 1.4.1, then
-1.4.0.
+This release (1.4.3) changes one default so that the variance budget is as
+tight as the fit allows. The version on CRAN is 1.3.1, so this submission also
+carries the 1.4.2, 1.4.1 and 1.4.0 material; none of those was accepted. The
+changes are listed newest first.
 
 **Please note two changes in default output and one in reproducibility.**
 `decompose_uncertainty()` now reports `total_var` as the *measured* posterior
@@ -14,6 +14,23 @@ conservative: **any variance budget, credible interval, PIT, calibration or
 shelf life produced by 1.3.x for a model carrying an autocorrelation term
 should be recomputed rather than trusted.** Models without such a term are
 affected only at the level of Monte Carlo error.
+
+## 1.4.3 — the decomposition now uses every draw in the fit
+
+`et_predict(n_draws =)` defaulted to 2000 draws even when the fit held many
+more. Since 1.4.0 `total_var` is the *measured* variance of the predictive
+draws rather than the sum of its channels, so for an iid model the reported
+`closure_gap` is exactly the Monte Carlo error of that measurement.
+Subsampling therefore widened the gap for no benefit, because the draws are
+paid for during sampling and prediction is matrix work. On a 90-observation
+Gaussian fit the per-observation gap has mean zero throughout, but its spread
+falls from 4.0% of `total_var` at 2000 draws to 1.2% at 8000.
+
+The default is now `NULL`, meaning every available draw; an integer still
+bounds memory on wide `newdata` and is capped at the draws present. **This
+changes reported numbers**: a decomposition, interval, PIT, calibration or
+shelf life from the old default is a noisier estimate of the same quantity,
+not a different one.
 
 ## 1.4.2 — a model fitted outside the package can now be used
 

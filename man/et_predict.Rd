@@ -11,7 +11,7 @@ et_predict(
   env_cov = NULL,
   env_dist = NULL,
   env_ensemble = NULL,
-  n_draws = 2000L,
+  n_draws = NULL,
   ci_levels = c(0.5, 0.8, 0.9, 0.95),
   n_perturb = NULL,
   n_env_draws = 1L,
@@ -138,8 +138,14 @@ credible interval by default.  This is the recommended way to build a
 genuine \emph{reforecast} in which only information available at the issue
 date is used.}
 
-\item{n_draws}{Integer.  Number of posterior draws to use (default 2000;
-capped at the number of draws available in the fit).}
+\item{n_draws}{Integer or \code{NULL}.  Number of posterior draws to use.
+The default \code{NULL} uses \emph{every} draw the fit holds, which is
+almost always what you want: \code{total_var} is the \strong{measured}
+variance of the predictive draws, so its Monte Carlo error is what the iid
+\code{closure_gap} reports, and subsampling widens that gap, and loosens
+every interval, PIT and shelf-life quantile, for nothing, since the draws
+are already computed.  Supply an integer only to bound memory on very wide
+\code{newdata}; it is capped at the draws available in the fit.}
 
 \item{ci_levels}{Numeric vector.  Credible interval levels to compute
 (default \code{c(0.5, 0.8, 0.9, 0.95)}).}
