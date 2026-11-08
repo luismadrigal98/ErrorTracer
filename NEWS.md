@@ -28,6 +28,39 @@ Makes the variance budget as tight as the fit allows.
   estimate of the same quantity, not a different quantity, but it will not
   reproduce exactly.
 
+## Bug fixes
+
+* **A non-Gaussian family with an `ar()` term no longer fits and then fails to
+  predict.** `brms` carries an autocorrelation term as response residuals for
+  `gaussian` and `student`, but as a vector of *latent* residuals for every
+  other family under its default `cov = FALSE` — and it cannot extend latent
+  residuals to new rows. So `et_fit(y ~ x + ar(time = t), family = poisson())`
+  compiled, sampled and returned a model, and `et_predict()` then died several
+  frames inside `brms` with "Cannot predict new latent residuals", no remedy
+  offered.
+
+  `et_fit()` now stops before Stan is invoked (measured at 0.03 s against tens
+  of seconds of compilation) and names the fix, `cov = TRUE`. `et_predict()`
+  carries the same check, because a fit can also arrive through
+  `as_et_model()`. Gaussian and student models are untouched: a Portal-style
+  `ar(cov = FALSE)` fit predicts bit-identically to 1.4.2.
+
+  Note one consequence the message states: `brms` offers the covariance
+  formulation at order one only, so a non-Gaussian family cannot carry an
+  autocorrelation term beyond lag 1 at all.
+
+* **The non-Gaussian `ar(cov = TRUE)` path now warns that its draws may leave
+  the response support.** That path keeps the location-shift construction,
+  because `y - mu` is what carries the `brms` forward iteration, so it is a
+  first-order approximation of a draw from the family at the perturbed mean.
+  The documentation said exactly that and stopped there, which understated it:
+  on a small-count Poisson fit, **12.3% of the env-inclusive draws were
+  negative, every one was non-integer, and 41 of 60 credible-interval rows had
+  a negative lower bound.** The informational message is now a warning that
+  says so and points at `env_noise = NULL` for exact draws. The construction
+  itself is unchanged; replacing it needs the latent AR term propagated on the
+  link scale, which is future work.
+
 ## Documentation
 
 * **One word for one thing: the pieces of the variance budget are

@@ -388,6 +388,114 @@ et_theme <- function(base_size = 12) {
   grepl("\\b(ar|ma|arma|cosy|unstr|sar|car)\\s*\\(", txt)
 }
 
+# ============================================================
+# Autocorrelation: which brms parameterisation, and can it be predicted?
+# ============================================================
+# brms represents an ar()/ma()/arma() term in one of two ways, and the choice
+# decides whether ErrorTracer can forecast from the fit at all.
+#
+#   family in (gaussian, student)  -> "natural" residuals. The generated Stan
+#       code computes err[n] = Y[n] - mu[n] and adds the lagged residuals to
+#       the mean, so the deviation y_pp - mu carries the AR accumulation and
+#       brms can iterate the process forward onto new rows.
+#
+#   any other family, cov = FALSE  -> LATENT residuals. The Stan code declares
+#       err = sderr * zerr as a parameter vector with a std_normal prior and
+#       adds it to the linear predictor. There is no residual to continue from,
+#       and brms refuses outright: "Cannot predict new latent residuals when
+#       using cov = FALSE in autocor terms." et_fit() succeeds, then
+#       et_predict() dies several frames inside brms.
+#
+#   any other family, cov = TRUE   -> the residual covariance matrix is used
+#       and prediction works, at the cost described at .inflate_env_predictive.
+#
+# So the gate is the FAMILY NAME, not the link: brms computes err = Y - mu for
+# gaussian and student whatever the link.
+.family_has_natural_residuals <- function(family) {
+  if (is.null(family)) return(TRUE)
+  tolower(family$family %||% "") %in% c("gaussian", "normal", "student")
+}
+
+# TRUE / FALSE / NA(unknown) for "every autocorrelation term sets cov = TRUE".
+# The term is rebuilt with brms's own exported constructors (ar(), ma(), ...)
+# so the answer comes from brms's parser rather than from a guess, with a
+# textual fallback for anything the constructors cannot evaluate.
+.autocor_cov <- function(formula) {
+  if (is.null(formula)) return(NA)
+  if (inherits(formula, "brmsfit")) formula <- formula$formula
+  ctors <- c("ar", "ma", "arma", "cosy", "unstr", "sar", "car")
+
+  tryCatch({
+    bt  <- brms::brmsterms(formula)
+    acs <- if (inherits(bt, "mvbrmsterms")) {
+      lapply(bt$terms, function(x) x$dpars$mu$ac)
+    } else {
+      list(bt$dpars$mu$ac)
+    }
+    acs <- acs[!vapply(acs, is.null, logical(1))]
+    if (!length(acs)) return(NA)
+
+    env <- new.env(parent = baseenv())
+    for (nm in ctors) {
+      fn <- tryCatch(getExportedValue("brms", nm), error = function(e) NULL)
+      if (!is.null(fn)) assign(nm, fn, envir = env)
+    }
+
+    covs <- unlist(lapply(acs, function(acf) {
+      labs <- attr(stats::terms(acf), "term.labels")
+      vapply(labs, function(lab) {
+        o <- tryCatch(eval(str2lang(lab), envir = env), error = function(e) NULL)
+        if (!is.null(o) && !is.null(o$cov)) return(isTRUE(o$cov))
+        # NA here is not only "unparseable": brms rejects some legal-looking
+        # terms outright, e.g. ar(p = 2, cov = TRUE) ("Covariance formulation
+        # of ARMA structures is only possible for effects of maximal order
+        # one"). Returning NA lets .check_autocor_family() warn and leaves
+        # brms to give its own, better, message at fit time.
+        # Fallback: read it off the term text.
+        if (grepl("cov\\s*=\\s*TRUE", lab)) return(TRUE)
+        if (grepl("cov\\s*=", lab)) return(NA)
+        FALSE
+      }, logical(1))
+    }), use.names = FALSE)
+
+    if (!length(covs) || all(is.na(covs))) NA else all(covs, na.rm = TRUE)
+  }, error = function(e) NA)
+}
+
+# Shared gate for et_fit() and et_predict(): a non-Gaussian autocorrelation
+# model that brms cannot predict from. Errors rather than warns, because the
+# alternative is an opaque brms backtrace after paying for sampling.
+# `stage` only shapes the wording.
+.check_autocor_family <- function(formula, family, stage = c("fit", "predict")) {
+  stage <- match.arg(stage)
+  if (.family_has_natural_residuals(family)) return(invisible(NULL))
+  if (!.formula_has_autocor(formula)) return(invisible(NULL))
+
+  cov_ok <- .autocor_cov(formula)
+  fam    <- family$family %||% "this family"
+
+  if (isFALSE(cov_ok)) {
+    stop("A '", fam, "' family with an autocorrelation term requires ",
+         "cov = TRUE. With brms's default cov = FALSE the autocorrelation is ",
+         "carried by latent residuals that brms cannot extend to new rows, so ",
+         if (stage == "fit") "the fit would succeed and et_predict() would fail"
+         else "prediction cannot proceed",
+         " (\"Cannot predict new latent residuals\"). Write the term as, for ",
+         "example, ar(time = year, p = 1, cov = TRUE). Note that brms allows ",
+         "the covariance formulation at order one only, so a non-Gaussian ",
+         "family cannot carry an autocorrelation term beyond lag 1 at all. ",
+         "Gaussian and student families are unaffected and need no change.",
+         call. = FALSE)
+  }
+  if (is.na(cov_ok)) {
+    .et_warn("Could not determine whether the autocorrelation term of this '",
+             fam, "' model sets cov = TRUE. Non-Gaussian families need ",
+             "cov = TRUE, or prediction will fail inside brms.")
+  }
+  invisible(NULL)
+}
+
+
 # Treat an absent variance component as a scalar zero so it can be summed into the
 # budget without branching at every call site.
 .zero_if_null <- function(x) if (is.null(x)) 0 else x

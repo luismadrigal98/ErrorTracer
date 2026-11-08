@@ -69,25 +69,38 @@ terms and \code{me()} terms live under \code{class = "bsp"}; brms
 defaults are used instead (and a warning is logged).}
 
 \item{ar_prior}{Character. Prior on autocorrelation parameters
-(\code{class = "ar"} / \code{"ma"}) when the formula carries an
-\code{ar()} / \code{ma()} / \code{arma()} term. \code{brms}'s own default
-is \emph{flat and unbounded}, which on a short series lets the posterior
-straddle the unit root; the k-step forecast variance
-\eqn{\sigma^2 (1 - \phi^{2k}) / (1 - \phi^2)} then diverges, and
-\code{temporal_var} and \code{\link{shelf_life}} become uninterpretable.
-Options:
-\describe{
-  \item{\code{"weakly_informative"}}{(default) \code{normal(0, 0.5)} — about
-    95\% of the prior mass lies inside \eqn{(-1, 1)}, but the parameter is
-    not hard-bounded, so a genuinely non-stationary series can still say so.}
-  \item{\code{"stationary"}}{The same prior truncated to \eqn{(-1, 1)}. For
-    AR(1) this is exactly the stationarity region; for higher orders it is
-    necessary but not sufficient, and a warning says so.}
-  \item{\code{"flat"}}{\code{brms}'s unbounded default.}
-}
-A prior the caller supplies for these classes is never overridden.
-Regardless of the setting, \code{et_fit()} warns after fitting when more
-than 5\% of the posterior sits at \eqn{|\phi| \ge 1}.}
+  (\code{class = "ar"} / \code{"ma"}) when the formula carries an
+  \code{ar()} / \code{ma()} / \code{arma()} term. \code{brms}'s own default
+  is \emph{flat and unbounded}, which on a short series lets the posterior
+  straddle the unit root; the k-step forecast variance
+  \eqn{\sigma^2 (1 - \phi^{2k}) / (1 - \phi^2)} then diverges, and
+  \code{temporal_var} and \code{\link{shelf_life}} become uninterpretable.
+  Options:
+  \describe{
+    \item{\code{"weakly_informative"}}{(default) \code{normal(0, 0.5)} — about
+      95\% of the prior mass lies inside \eqn{(-1, 1)}, but the parameter is
+      not hard-bounded, so a genuinely non-stationary series can still say so.}
+    \item{\code{"stationary"}}{The same prior truncated to \eqn{(-1, 1)}. For
+      AR(1) this is exactly the stationarity region; for higher orders it is
+      necessary but not sufficient, and a warning says so.}
+    \item{\code{"flat"}}{\code{brms}'s unbounded default.}
+  }
+  A prior the caller supplies for these classes is never overridden.
+  Regardless of the setting, \code{et_fit()} warns after fitting when more
+  than 5\% of the posterior sits at \eqn{|\phi| \ge 1}.
+
+  \strong{Families and autocorrelation.} \code{brms} represents an
+  autocorrelation term in two ways, and only one of them can be forecast
+  from. For \code{gaussian} and \code{student} it uses the response
+  residuals (\eqn{\varepsilon = y - \mu}) and iterates the fitted process
+  onto new rows, which is what \code{\link{et_predict}} needs. For any
+  other family with \code{brms}'s default \code{cov = FALSE} the term
+  becomes a vector of \emph{latent} residuals that \code{brms} cannot
+  extend beyond the training rows, so \code{et_fit()} stops with an
+  explanation rather than letting the fit succeed and the prediction fail.
+  Write such a term as \code{ar(time = year, p = 1, cov = TRUE)}. Because
+  the covariance formulation exists at order one only, a non-Gaussian family
+  cannot carry an autocorrelation term beyond lag 1 in \code{brms} at all.}
 
 \item{silent}{Integer passed to \code{brms::brm()} (default 2, no Stan
 output).}

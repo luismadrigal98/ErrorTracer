@@ -95,6 +95,19 @@
 #'   A prior the caller supplies for these classes is never overridden.
 #'   Regardless of the setting, \code{et_fit()} warns after fitting when more
 #'   than 5\% of the posterior sits at \eqn{|\phi| \ge 1}.
+#'
+#'   \strong{Families and autocorrelation.} \code{brms} represents an
+#'   autocorrelation term in two ways, and only one of them can be forecast
+#'   from. For \code{gaussian} and \code{student} it uses the response
+#'   residuals (\eqn{\varepsilon = y - \mu}) and iterates the fitted process
+#'   onto new rows, which is what \code{\link{et_predict}} needs. For any
+#'   other family with \code{brms}'s default \code{cov = FALSE} the term
+#'   becomes a vector of \emph{latent} residuals that \code{brms} cannot
+#'   extend beyond the training rows, so \code{et_fit()} stops with an
+#'   explanation rather than letting the fit succeed and the prediction fail.
+#'   Write such a term as \code{ar(time = year, p = 1, cov = TRUE)}. Because
+#'   the covariance formulation exists at order one only, a non-Gaussian family
+#'   cannot carry an autocorrelation term beyond lag 1 in \code{brms} at all.
 #' @param silent Integer passed to \code{brms::brm()} (default 2, no Stan
 #'   output).
 #' @param ... Additional arguments passed to \code{brms::brm()}.
@@ -150,6 +163,28 @@ et_fit <- function(formula,
       priors <- NULL
     }
   }
+
+  # A non-Gaussian family with an autocorrelation term is only predictable when
+  # the term sets cov = TRUE (see .check_autocor_family). Check it here, before
+  # Stan compiles anything: brms fits the cov = FALSE form happily and only
+  # et_predict() discovers that the latent residuals cannot be extended.
+  # family arrives through ... on its way to brms::brm().
+  .fam_arg <- list(...)$family
+  .check_autocor_family(
+    formula = formula,
+    family  = if (is.null(.fam_arg)) {
+      NULL
+    } else if (inherits(.fam_arg, c("family", "brmsfamily", "customfamily"))) {
+      .fam_arg
+    } else if (is.function(.fam_arg)) {
+      tryCatch(.fam_arg(), error = function(e) NULL)
+    } else if (is.character(.fam_arg)) {
+      list(family = .fam_arg)
+    } else {
+      NULL
+    },
+    stage = "fit"
+  )
 
   if (!is.null(grouping)) {
     result <- .et_fit_grouped(

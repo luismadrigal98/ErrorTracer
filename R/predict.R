@@ -410,6 +410,10 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # otherwise its variance does not accumulate with lead time.
   has_autocor <- .formula_has_autocor(fit$formula)
 
+  # Same gate as et_fit(), repeated because a fit can also arrive through
+  # as_et_model() without ever passing through et_fit().
+  .check_autocor_family(fit$formula, fit$family, stage = "predict")
+
   # Cap the number of draws at what the fit actually holds, then use an
   # explicit, shared set of draw ids so posterior_predict and
   # posterior_linpred are aligned draw-for-draw (required for the residual
@@ -648,11 +652,23 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
     pp
   } else if (is_gauss_id || has_autocor) {
     if (has_autocor && !is_gauss_id) {
-      .et_info("Non-Gaussian family with a residual autocorrelation term: the ",
-               "env-inclusive predictive draws use the location-shift ",
-               "construction, which preserves the autocorrelation accumulation ",
-               "but is only a first-order approximation of a draw from the ",
-               "family at the perturbed mean.")
+      # Not an .et_info: the draws can leave the response support. On a
+      # small-count Poisson ar(cov = TRUE) fit, 12.3% of the env-inclusive
+      # draws came out negative, all of them non-integer, and 41 of 60
+      # credible-interval rows had a negative lower bound. The location shift
+      # is kept because y_pp - mu is what carries the brms forward iteration,
+      # but the user has to be told what they are holding.
+      .et_warn("Non-Gaussian family ('", fit$family$family %||% "?",
+               "') with a residual autocorrelation term: the env-inclusive ",
+               "predictive draws use the location-shift construction, which ",
+               "preserves the autocorrelation accumulation but is only a ",
+               "first-order approximation of a draw from the family at the ",
+               "perturbed mean. The draws are NOT guaranteed to respect the ",
+               "response support -- for a count or bounded family expect ",
+               "non-integer and possibly negative values, and read the ",
+               "intervals, PIT and shelf life accordingly. Supply ",
+               "env_noise = NULL to get exact draws without driver ",
+               "uncertainty.")
     }
     .inflate_env_predictive(mu_perturbed, pp, mu_draws)
   } else {
