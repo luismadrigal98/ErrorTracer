@@ -137,7 +137,7 @@
 #'   \emph{the whole env-inclusive budget}: the perturbed mean of draw \eqn{s}
 #'   must be paired with the residual of that same draw \eqn{s}, so when
 #'   \code{n_perturb < n_draws} and environmental uncertainty is present, the
-#'   predictive draws and every decomposition channel are computed on the first
+#'   predictive draws and every decomposition component are computed on the first
 #'   \code{n_perturb} draws rather than recycling the perturbation across all
 #'   of them.  Recycling would destroy
 #'   \eqn{\mathrm{Cov}(\mu^{(s)}, y^{pp,(s)} - \mu^{(s)})}, which is
@@ -191,7 +191,7 @@
 #'   reported interval deliberately narrower than \code{total_var} implies,
 #'   since \code{total_var} is always the variance of the env-inclusive draws.
 #' @param var_trim Numeric in \eqn{[0, 0.5)}, default \code{0}.  Winsorization
-#'   applied when computing \emph{every} variance channel of the decomposition:
+#'   applied when computing \emph{every} variance component of the decomposition:
 #'   each column of draws is clipped to its
 #'   \eqn{[\code{var\_trim},\, 1 - \code{var\_trim}]} quantiles before
 #'   \code{var()}.  The default \code{0} is the plain sample variance, so the
@@ -199,7 +199,7 @@
 #'   interval is drawn from.  A non-zero value trades that coherence for
 #'   robustness against a heavy-tailed predictive distribution, and is applied
 #'   uniformly across \code{param_var}, \code{env_var}, the posterior-predictive
-#'   variance and hence \code{temporal_var} — never to one channel only, which
+#'   variance and hence \code{temporal_var} — never to one component only, which
 #'   would bias their differences.
 #'
 #'   Winsorizing is \strong{not} the right remedy for a near-unit-root
@@ -244,7 +244,7 @@
 #'     iid ones.
 #'     All components are on the \strong{response scale}.
 #'     \code{total_var} is the \strong{measured} variance of the env-inclusive
-#'     predictive draws, not the sum of the channels; see
+#'     predictive draws, not the sum of the components; see
 #'     \code{\link{decompose_uncertainty}}.
 #'     \code{v_env_mcse} is the Monte Carlo SE of \code{env_var}.
 #'     \code{residual_var} is per-observation for non-Gaussian families
@@ -432,7 +432,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   # group effect is an estimated parameter whose posterior uncertainty already
   # sits inside the linear predictor, and conditioning on it *reduces*
   # predictive variance relative to the population level -- so there is no extra
-  # channel, and Var(full) - Var(population) is NEGATIVE (measured on a 6-group
+  # component, and Var(full) - Var(population) is NEGATIVE (measured on a 6-group
   # fixture: 0.022 vs 0.244). Reporting that difference as a "group variance"
   # would repeat the ar() error: subtracting two quantities that are not
   # conditioned alike.
@@ -452,7 +452,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   if (new_levels) {
     .et_info("newdata contains group level(s) not present in the training data; ",
              "predicting out-of-sample by integrating over the group-level ",
-             "distribution, and reporting a separate group_var channel.")
+             "distribution, and reporting a separate group_var component.")
   }
 
   # --- 1. Posterior predictive (full uncertainty, response scale) ---
@@ -478,9 +478,9 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
   #   (b) env_var = Var(mu_perturbed) - Var(mu_draws_sub) becomes a difference
   #       between a hand-rolled LP (no AR term, from .compute_lp_perturbed) and
   #       an AR-carrying LP, i.e. V_env - V_AR. That goes negative and is then
-  #       clamped by pmax(., 0), silently destroying the environmental channel.
+  #       clamped by pmax(., 0), silently destroying the environmental component.
   # incl_autocor = FALSE returns the pure regression linear predictor — exactly
-  # what the param/env channels are defined to mean — and is bit-identical to
+  # what the param/env components are defined to mean — and is bit-identical to
   # the predictor .compute_lp_perturbed() builds (verified: max |diff| = 0), so
   # the AR term cancels cleanly in the env subtraction. The AR accumulation is
   # not lost: it is recovered as temporal_var from the history-conditioned
@@ -510,7 +510,7 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
       trials)
   }
 
-  # --- 3b. Group-level (hierarchical) channel ---
+  # --- 3b. Group-level (hierarchical) component ---
   # See the block above .et_new_level_args() for why this is only computed for
   # groups the fit has not seen.
   mu_pop_draws <- if (new_levels) {
@@ -670,17 +670,17 @@ et_predict.et_model <- function(model, newdata, env_noise = NULL,
     }
   }
 
-  # Which mean does the residual channel belong to?
+  # Which mean does the residual component belong to?
   #
   # The budget partitions Var(y~_env) = Var_s(mu*) + E_s[V(mu*)], where mu* is
   # the mean that generated the draws. Under the family-correct redraw that is
-  # mu_env, so E_s[V(mu_env)] is the residual channel and the budget closes.
+  # mu_env, so E_s[V(mu_env)] is the residual component and the budget closes.
   # Evaluating it at mu instead would leave E[V(mu_env)] - E[V(mu)] unexplained:
   # for a log link that is the Jensen term mu (exp(b^2 d^2 / 2) - 1), measured at
   # 0.6-4.8% of total on a Poisson fit. Under the location shift the dispersion
   # really is the one at mu, so mu_draws is correct there.
   #
-  # For a non-identity link this means the residual channel depends on driver
+  # For a non-identity link this means the residual component depends on driver
   # uncertainty through the variance function. That is a property of the model,
   # not an artefact: the process variance sits at the (uncertain) true driver
   # value, not at the measured one. For Gaussian, V(mu) = sigma^2 is independent
@@ -1213,12 +1213,12 @@ et_predict.brmsfit <- function(model, newdata, ...) {
   # matched draw-for-draw). Defaults to pp when the caller has no environmental
   # uncertainty, in which case the two are the same sample.
   if (is.null(pp_env)) pp_env <- pp
-  # Mean matrix the residual channel is evaluated at; see et_predict section 7.
+  # Mean matrix the residual component is evaluated at; see et_predict section 7.
   if (is.null(mu_resid)) mu_resid <- mu_draws
   n_obs <- ncol(pp)
   n_p   <- nrow(mu_perturbed)
 
-  # ONE variance estimator for every channel. Previously pp_var was winsorized
+  # ONE variance estimator for every component. Previously pp_var was winsorized
   # while param_var / the env pair were raw, so temporal_var was a difference
   # between two different estimators — biased low by whatever the winsorization
   # removed (~3.6% for a Gaussian at trim = 0.01), which blinded it to genuine
@@ -1332,12 +1332,12 @@ et_predict.brmsfit <- function(model, newdata, ...) {
   pp_var     <- col_var(pp_env)
   total_var  <- pp_var
 
-  # Named channels: everything attributable to an identified source.
+  # Named components: everything attributable to an identified source.
   explained <- param_var + .zero_if_null(group_var) + env_var + residual_var
 
   if (isTRUE(has_autocor)) {
     # Temporal (autocorrelation-induced) variance: what the predictive
-    # distribution carries beyond the named channels. For Gaussian AR(p) this is
+    # distribution carries beyond the named components. For Gaussian AR(p) this is
     # the accumulation of innovations beyond a single sigma^2; for ARMA / MA /
     # cosy() / sar() / car() it absorbs whatever residual dependence structure
     # brms is modelling, the part a single-innovation residual_var cannot
@@ -1348,7 +1348,7 @@ et_predict.brmsfit <- function(model, newdata, ...) {
     # predictive variance relative to the independent-innovation baseline. The
     # old pmax(., 0) hid that case, and together with the definitional total it
     # hid closure failures too. Being the residual of a measured total, it also
-    # absorbs Monte Carlo error from the other channels, so a temporal_var of
+    # absorbs Monte Carlo error from the other components, so a temporal_var of
     # the same order as v_env_mcse is noise rather than signal.
     temporal_var <- total_var - explained
     closure_gap  <- NULL
@@ -1375,13 +1375,13 @@ et_predict.brmsfit <- function(model, newdata, ...) {
   } else {
     temporal_var <- NULL
     # iid: there is no fourth source, so the law of total variance says the
-    # named channels should already account for total_var. They no longer do so
+    # named components should already account for total_var. They no longer do so
     # by definition, which makes the shortfall informative, so report it as a
-    # diagnostic instead of folding it into a channel. For a correctly specified
+    # diagnostic instead of folding it into a component. For a correctly specified
     # iid model it is pure Monte Carlo error with mean zero, at the scale of a
     # variance estimated from n_draws draws (~sqrt(2/n_draws) relative), which
     # is several times v_env_mcse; judge it by its mean across observations. A
-    # non-zero mean closure_gap means a channel is mis-estimated, or that
+    # non-zero mean closure_gap means a component is mis-estimated, or that
     # the family's predictive draw is not a location shift of its mean (see
     # .inflate_env_predictive).
     closure_gap <- total_var - explained

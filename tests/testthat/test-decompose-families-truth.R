@@ -95,7 +95,7 @@ test_that("Binomial (logit link) decomposition matches a simulated truth", {
 })
 
 test_that("env perturbation is recovered on the response scale under a log link", {
-  # With a log link the environmental channel is NOT beta^2 * delta^2 (that is
+  # With a log link the environmental component is NOT beta^2 * delta^2 (that is
   # the link-scale answer); on the response scale it is scaled by (dmu/deta)^2 =
   # mu^2. Verify against a direct simulation rather than a link-scale formula,
   # since conflating the two scales is an easy and invisible error.

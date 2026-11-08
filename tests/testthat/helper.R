@@ -6,7 +6,7 @@ options(brms.backend = "rstan")
 
 # ── Budget closure ──────────────────────────────────────────────────────────
 # Since 1.4.0 total_var is the MEASURED variance of the env-inclusive posterior
-# predictive draws, not the sum of the channels, so the channels close on it as
+# predictive draws, not the sum of the components, so the components close on it as
 # a RESULT rather than by definition. The closure gap is therefore Monte Carlo
 # error, and these helpers bound it by its own scale instead of asserting an
 # identity to 1e-8 (which the old definitional total satisfied tautologically).
@@ -27,7 +27,7 @@ expect_budget_closes <- function(dec, pred = NULL, n_eff = NULL,
   if ("group_var" %in% colnames(dec))    comp <- comp + dec$group_var
   if ("temporal_var" %in% colnames(dec)) comp <- comp + dec$temporal_var
 
-  # With a temporal channel the closure is exact by construction (temporal_var
+  # With a temporal component the closure is exact by construction (temporal_var
   # IS the remainder), so assert the identity there.
   if ("temporal_var" %in% colnames(dec)) {
     testthat::expect_equal(dec$total_var, comp, tolerance = 1e-8)

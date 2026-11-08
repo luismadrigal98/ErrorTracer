@@ -167,14 +167,14 @@ test_that("a family-correct budget closes where a location shift would not", {
   pp     <- matrix(rpois(n_s * n_obs, as.vector(mu)),     nrow = n_s)
   pp_env <- ErrorTracer:::.family_rng(fam, mu_env, disp)
 
-  # Residual channel at the GENERATING mean (mu_env) -> closes.
+  # Residual component at the GENERATING mean (mu_env) -> closes.
   good <- ErrorTracer:::.decompose_from_arrays(
     pp = pp, pp_env = pp_env, mu_draws = mu, mu_perturbed = mu_env,
     mu_draws_sub = mu, family = fam, disp_draws = disp,
     mu_resid = mu_env)
   expect_lt(max(abs(good$closure_gap) / good$total_var), 0.05)
 
-  # Residual channel at mu instead -> the Jensen term shows up as a gap.
+  # Residual component at mu instead -> the Jensen term shows up as a gap.
   bad <- ErrorTracer:::.decompose_from_arrays(
     pp = pp, pp_env = pp_env, mu_draws = mu, mu_perturbed = mu_env,
     mu_draws_sub = mu, family = fam, disp_draws = disp,

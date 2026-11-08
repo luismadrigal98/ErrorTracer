@@ -388,7 +388,7 @@ et_theme <- function(base_size = 12) {
   grepl("\\b(ar|ma|arma|cosy|unstr|sar|car)\\s*\\(", txt)
 }
 
-# Treat an absent variance channel as a scalar zero so it can be summed into the
+# Treat an absent variance component as a scalar zero so it can be summed into the
 # budget without branching at every call site.
 .zero_if_null <- function(x) if (is.null(x)) 0 else x
 

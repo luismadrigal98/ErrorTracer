@@ -7,7 +7,7 @@ Makes the variance budget as tight as the fit allows.
 * **`et_predict(n_draws =)` now defaults to every draw in the fit**, not to
   2000. This matters more than it sounds. Since 1.4.0 `total_var` is the
   *measured* variance of the predictive draws rather than the sum of the
-  channels, so for an iid model the `closure_gap` is exactly the Monte Carlo
+  components, so for an iid model the `closure_gap` is exactly the Monte Carlo
   error of that measurement. Subsampling a fit that already holds more draws
   therefore widens the gap for no gain: the draws are paid for at sampling
   time, and prediction is matrix work.
@@ -27,6 +27,16 @@ Makes the variance budget as tight as the fit allows.
   calibration or shelf life produced with the old default is a noisier
   estimate of the same quantity, not a different quantity, but it will not
   reproduce exactly.
+
+## Documentation
+
+* **One word for one thing: the pieces of the variance budget are
+  *components*.** The documentation, the code comments and the five
+  informational messages that mention them had drifted between *channel* and
+  *component* for the same quantity. They now all say *component*, matching the
+  column names (`param_var`, `env_var`, `resid_var`, `temporal_var`,
+  `group_var`) and the accompanying paper. No argument, column or return value
+  changed.
 
 # ErrorTracer 1.4.2
 

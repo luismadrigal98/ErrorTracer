@@ -65,7 +65,7 @@ a prior specification, or to override the training data.
 \section{What the pipeline reads off the fit}{
 
 Four things: the posterior draws; the response family, for the variance
-function of the residual channel; the model formula, to find the response
+function of the residual component; the model formula, to find the response
 column and to detect an \code{ar()}-family term; and the training data, to
 continue an autocorrelated series forward and to set the default
 \code{response_scale} in \code{\link{shelf_life}}. A \code{brmsfit} carries

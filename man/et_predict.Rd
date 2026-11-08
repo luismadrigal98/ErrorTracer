@@ -156,7 +156,7 @@ Reducing it speeds up the perturbation at the cost of a smaller sample for
 \emph{the whole env-inclusive budget}: the perturbed mean of draw \eqn{s}
 must be paired with the residual of that same draw \eqn{s}, so when
 \code{n_perturb < n_draws} and environmental uncertainty is present, the
-predictive draws and every decomposition channel are computed on the first
+predictive draws and every decomposition component are computed on the first
 \code{n_perturb} draws rather than recycling the perturbation across all
 of them.  Recycling would destroy
 \eqn{\mathrm{Cov}(\mu^{(s)}, y^{pp,(s)} - \mu^{(s)})}, which is
@@ -214,7 +214,7 @@ reported interval deliberately narrower than \code{total_var} implies,
 since \code{total_var} is always the variance of the env-inclusive draws.}
 
 \item{var_trim}{Numeric in \eqn{[0, 0.5)}, default \code{0}.  Winsorization
-  applied when computing \emph{every} variance channel of the decomposition:
+  applied when computing \emph{every} variance component of the decomposition:
   each column of draws is clipped to its
   \eqn{[\code{var\_trim},\, 1 - \code{var\_trim}]} quantiles before
   \code{var()}.  The default \code{0} is the plain sample variance, so the
@@ -222,7 +222,7 @@ since \code{total_var} is always the variance of the env-inclusive draws.}
   interval is drawn from.  A non-zero value trades that coherence for
   robustness against a heavy-tailed predictive distribution, and is applied
   uniformly across \code{param_var}, \code{env_var}, the posterior-predictive
-  variance and hence \code{temporal_var} — never to one channel only, which
+  variance and hence \code{temporal_var} — never to one component only, which
   would bias their differences.
 
   Winsorizing is \strong{not} the right remedy for a near-unit-root
@@ -270,7 +270,7 @@ An \code{et_prediction} object (list) containing:
     iid ones.
     All components are on the \strong{response scale}.
     \code{total_var} is the \strong{measured} variance of the env-inclusive
-    predictive draws, not the sum of the channels; see
+    predictive draws, not the sum of the components; see
     \code{\link{decompose_uncertainty}}.
     \code{v_env_mcse} is the Monte Carlo SE of \code{env_var}.
     \code{residual_var} is per-observation for non-Gaussian families

@@ -122,10 +122,10 @@ Two boundaries to keep in mind:
     the in-sample / out-of-sample distinction handled explicitly. Predicting
     for a group the fit has \emph{seen} uses that group's estimated effect:
     the effect is a parameter, its posterior uncertainty is part of
-    \code{param_var}, and there is no separate group channel (conditioning on
+    \code{param_var}, and there is no separate group component (conditioning on
     a known group \emph{reduces} predictive variance relative to the
     population level). Predicting for a \emph{new} level integrates over the
-    group-level distribution and adds a \code{group_var} channel carrying the
+    group-level distribution and adds a \code{group_var} component carrying the
     between-group variance; \code{\link{et_predict}} detects new levels
     automatically. The \code{grouping} argument here is a \emph{separate}
     device: it fits one independent model per group (no pooling), not a

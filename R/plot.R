@@ -17,11 +17,11 @@
 #' @param decomp A \code{data.frame} from \code{\link{decompose_uncertainty}}
 #'   or directly the \code{$decomposition} slot of an \code{et_prediction}.
 #' @param proportional Logical.  If \code{TRUE} (default), each component is
-#'   shown as a share of the channels drawn, so every bar sums to exactly 1
+#'   shown as a share of the components drawn, so every bar sums to exactly 1
 #'   and the y axis is a true proportion (labelled as a percentage).  For an
 #'   autocorrelation model that denominator \emph{is} \code{total_var},
 #'   because \code{temporal_var} is the remainder against it.  For an iid
-#'   model the named channels fall short of \code{total_var} by
+#'   model the named components fall short of \code{total_var} by
 #'   \code{closure_gap}, so the bars are shares of the decomposed variance
 #'   rather than of the measured total; the gap is reported in the
 #'   decomposition and by \code{print()}, and a material one raises an
@@ -69,7 +69,7 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
     decomp           <- agg
   }
 
-  # Normalise against the sum of the channels actually drawn, so the bars are
+  # Normalise against the sum of the components actually drawn, so the bars are
   # true proportions and reach exactly 1. Dividing by total_var instead leaves
   # iid bars short by the closure gap (up to ~13% on real forecasts), which
   # reads as a plotting error on an axis labelled "share". For an
@@ -90,10 +90,10 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
         gap <- (tv[ok] - denom[ok]) / tv[ok]
         if (abs(mean(gap)) > 0.01 || max(abs(gap)) > 0.05) {
           gap_note <- sprintf(
-            paste0("The drawn channels do not account for the measured ",
+            paste0("The drawn components do not account for the measured ",
                    "total_var: mean %+.1f%%, max |%.1f%%|. Bars are shares of ",
-                   "the channels shown, not of total_var. Inspect closure_gap ",
-                   "in the decomposition; a non-zero MEAN means a channel is ",
+                   "the components shown, not of total_var. Inspect closure_gap ",
+                   "in the decomposition; a non-zero MEAN means a component is ",
                    "mis-estimated, while scatter around zero is Monte Carlo ",
                    "error."),
             100 * mean(gap), 100 * max(abs(gap)))
@@ -112,7 +112,7 @@ et_plot_decomposition <- function(decomp, proportional = TRUE,
     .et_info("A variance component is negative and is drawn below the zero ",
              "line: temporal_var is a signed covariance term, and closure_gap ",
              "is a signed remainder that goes negative whenever the named ",
-             "channels over-explain the measured total. Either one at the ",
+             "components over-explain the measured total. Either one at the ",
              "scale of ordinary Monte Carlo error on a variance (a few per ",
              "cent of total_var) is noise, not a real reduction in ",
              "predictive variance.")

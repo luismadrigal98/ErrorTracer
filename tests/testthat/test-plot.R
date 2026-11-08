@@ -197,7 +197,7 @@ test_that("et_plot_shelf_life draws in both placements", {
 
 test_that("proportional shares sum to exactly 1 and exclude the gap", {
   skip_if_not_installed("ggplot2")
-  # Shares are normalised by the channels drawn, not by total_var: dividing by
+  # Shares are normalised by the components drawn, not by total_var: dividing by
   # total_var left iid bars short of 1 by the closure gap (up to 13% on a real
   # forecast) on an axis labelled "share". The gap stays auditable in the
   # decomposition rather than being drawn as a bar.

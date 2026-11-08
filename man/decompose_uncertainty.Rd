@@ -52,7 +52,7 @@ inside an \code{et_prediction} object:
     autocorrelation term such as \code{ar()}, \code{ma()},
     \code{arma()}, \code{cosy()}, \code{unstr()}, \code{sar()}, or
     \code{car()}.) Variance attributable to residual temporal or spatial
-    dependence beyond the named channels, computed as the signed remainder
+    dependence beyond the named components, computed as the signed remainder
     \code{total_var - (param_var + env_var + residual_var)} (minus
     \code{group_var} when present).  This captures
     the AR/MA/ARMA innovation accumulation that a single-innovation
@@ -60,12 +60,12 @@ inside an \code{et_prediction} object:
     negative value means autocorrelated errors \emph{reduce} predictive
     variance relative to the independent-innovation baseline, which is a
     real possibility for a covariance term.  Being a remainder, it also
-    absorbs Monte Carlo error from the other channels, so read a
+    absorbs Monte Carlo error from the other components, so read a
     \code{temporal_var} of the same order as \code{v_env_mcse} as noise.}
   \item{closure_gap}{(Only present for iid models.)
     \code{total_var - (param_var + env_var + residual_var)} (minus
     \code{group_var} when present): how far the
-    named channels fall short of the measured posterior predictive variance.
+    named components fall short of the measured posterior predictive variance.
     For a correctly specified iid model it is Monte Carlo error with mean
     zero, but it is \emph{not} of the order of \code{v_env_mcse}: its scale
     is the sampling error of a variance estimated from \code{n_draws}
@@ -73,7 +73,7 @@ inside an \code{et_prediction} object:
     so single observations commonly sit several per cent and occasionally
     over ten per cent away from zero.  Judge it by its \emph{mean across
     observations}, which should be indistinguishable from zero; a mean that
-    is not means a channel is mis-estimated.}
+    is not means a component is mis-estimated.}
   \item{total_var}{Total predictive variance: the \strong{sampled variance
     of the environmentally inclusive posterior predictive draws}, which is
     the distribution the reported credible interval is drawn from.  The
@@ -86,7 +86,7 @@ Changed in 1.4.0.  \code{total_var} used to be \emph{defined} as the sum of
 the other components, which made the shares reconcile to 100\% by
 construction and made \code{env_var} an add-on to a predictive variance that
 did not contain it.  It is now measured, and the sum is recovered as a
-\emph{result}: the channels add up to \code{total_var} exactly for
+\emph{result}: the components add up to \code{total_var} exactly for
 autocorrelation models (where \code{temporal_var} is the remainder) and up to
 Monte Carlo error for iid models (reported as \code{closure_gap}).
 \code{param_var}, \code{env_var} and \code{residual_var} remain

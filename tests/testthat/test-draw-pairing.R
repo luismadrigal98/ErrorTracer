@@ -107,7 +107,7 @@ test_that("matched pairing recovers env_var, recycling inflates it", {
   expect_lt(mean(gap_matched  / env_true), 1.2)
 })
 
-# ── 3. total_var is measured, and the channels close on it ─────────────────
+# ── 3. total_var is measured, and the components close on it ─────────────────
 test_that("total_var equals the env-inclusive predictive variance", {
   f <- .pair_fixture()
   d <- .decomp_fixture(f, has_autocor = TRUE)
@@ -125,7 +125,7 @@ test_that("total_var equals the env-inclusive predictive variance", {
   expect_false("closure_gap" %in% colnames(d))
 })
 
-test_that("iid models report a small closure_gap instead of a temporal channel", {
+test_that("iid models report a small closure_gap instead of a temporal component", {
   f <- .pair_fixture()
   d <- .decomp_fixture(f, has_autocor = FALSE)
 

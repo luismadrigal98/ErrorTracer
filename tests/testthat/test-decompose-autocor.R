@@ -106,7 +106,7 @@ test_that("temporal_var is positive for a strongly autocorrelated series (M2)", 
 test_that("param_var does not absorb the ar error (M2)", {
   # Forecast x is iid, so regression parameter variance is flat in lead time.
   # Any strong monotone growth in param_var is ar error leaking into the
-  # 'parameter' channel.
+  # 'parameter' component.
   fit <- lm(.dec_ar$param_var ~ seq_len(nrow(.dec_ar)))
   slope <- unname(coef(fit)[2])
   # Growth of more than ~2% of the mean param_var per lead step indicates leakage.

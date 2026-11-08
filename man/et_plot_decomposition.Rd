@@ -11,11 +11,11 @@ et_plot_decomposition(decomp, proportional = TRUE, group_col = NULL)
 or directly the \code{$decomposition} slot of an \code{et_prediction}.}
 
 \item{proportional}{Logical.  If \code{TRUE} (default), each component is
-shown as a share of the channels drawn, so every bar sums to exactly 1
+shown as a share of the components drawn, so every bar sums to exactly 1
 and the y axis is a true proportion (labelled as a percentage).  For an
 autocorrelation model that denominator \emph{is} \code{total_var},
 because \code{temporal_var} is the remainder against it.  For an iid
-model the named channels fall short of \code{total_var} by
+model the named components fall short of \code{total_var} by
 \code{closure_gap}, so the bars are shares of the decomposed variance
 rather than of the measured total; the gap is reported in the
 decomposition and by \code{print()}, and a material one raises an

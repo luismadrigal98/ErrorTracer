@@ -146,7 +146,7 @@ test_that("temporal_var captures the autocor gap when has_autocor = TRUE", {
   # (pp carries more spread than one innovation), so here it is positive.
   expect_true(all(d_ar$temporal_var >= 0))
   # total_var is the MEASURED variance of the env-inclusive predictive draws,
-  # and temporal_var is the remainder, so the channels close on it exactly.
+  # and temporal_var is the remainder, so the components close on it exactly.
   expect_equal(d_ar$total_var, apply(pp_env, 2, stats::var))
   recon <- d_ar$param_var + d_ar$env_var + d_ar$residual_var + d_ar$temporal_var
   expect_equal(recon, d_ar$total_var, tolerance = 1e-10)
@@ -163,7 +163,7 @@ test_that("var_trim controls tail robustness of temporal_var, and is off by defa
   #   1. Applying it to the posterior-predictive variance only, while param_var
   #      and the env pair stayed raw, made temporal_var a difference between two
   #      different estimators — biased low by whatever the winsorization removed.
-  #      var_trim is now applied uniformly to every channel.
+  #      var_trim is now applied uniformly to every component.
   #   2. Silently reporting a robust variance next to a raw quantile interval
   #      means the budget and the interval describe different distributions. The
   #      honest fix for a diverging AR is a stationarity-respecting prior at fit
@@ -209,7 +209,7 @@ test_that("var_trim controls tail robustness of temporal_var, and is off by defa
   }
 })
 
-test_that("var_trim is applied to every channel, not just the predictive variance", {
+test_that("var_trim is applied to every component, not just the predictive variance", {
   # The old code winsorized pp_var while param_var / the env pair stayed raw,
   # so temporal_var = pp_var_winsorized - (param_var_raw + residual_var) was
   # biased low. Guard: trimming must move param_var too.
@@ -261,7 +261,7 @@ test_that("iid budget closes on the measured total within Monte Carlo error", {
   expect_true(mean(d$env_var) > 0)
   # total_var is the measured predictive variance, not a sum.
   expect_equal(d$total_var, apply(pp_env, 2, stats::var))
-  # The named channels account for it up to Monte Carlo error, reported as
+  # The named components account for it up to Monte Carlo error, reported as
   # closure_gap. The bound is deliberately loose: at n_draws = 400 the env
   # subtraction estimator alone carries sqrt(2 / 400) ~ 7%, before the error in
   # param_var and in Var(pp_env). What this guards against is a STRUCTURAL gap,

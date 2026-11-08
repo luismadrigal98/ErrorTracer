@@ -1,4 +1,4 @@
-# Group-level variance channel (ErrorTracer 1.3.1).
+# Group-level variance component (ErrorTracer 1.3.1).
 #
 # R1 (MEE-26-05-477, General Methods comment / Sec 4.3): "Lack of support for
 # hierarchical models ... is surprising ... with hierarchical models there's an
@@ -11,7 +11,7 @@
 #   in-sample  (known group): the group effect is an estimated parameter.
 #                             Conditioning on it REDUCES predictive variance
 #                             relative to the population level, so there is no
-#                             extra channel. Var(full) - Var(pop) is NEGATIVE
+#                             extra component. Var(full) - Var(pop) is NEGATIVE
 #                             and must NOT be reported as a group variance.
 #   out-of-sample (new group): the budget integrates over the group-level
 #                             distribution, and the extra variance is tau^2.
@@ -33,7 +33,7 @@ fit_hier <- function(tau = 1.2, sigma = 0.5, n_per = 10, n_grp = 6, seed = 1) {
   )
 }
 
-test_that("a known group yields NO group channel (in-sample budget)", {
+test_that("a known group yields NO group component (in-sample budget)", {
   h  <- fit_hier()
   nd <- data.frame(g = "a", x = seq(-1, 1, length.out = 5))
 
@@ -47,7 +47,7 @@ test_that("a known group yields NO group channel (in-sample budget)", {
   expect_budget_closes(dec, pred = pred)
 })
 
-test_that("a new group adds a group channel recovering tau^2", {
+test_that("a new group adds a group component recovering tau^2", {
   h  <- fit_hier()
   nd <- data.frame(g = "brand_new_group", x = seq(-1, 1, length.out = 5))
 
@@ -57,7 +57,7 @@ test_that("a new group adds a group channel recovering tau^2", {
   expect_true("group_var" %in% colnames(dec))
   expect_true(all(dec$group_var > 0))
 
-  # The group channel should recover the fitted between-group variance. Compare
+  # The group component should recover the fitted between-group variance. Compare
   # against tau_hat^2 from the fit itself rather than the generative tau, so the
   # test targets what the model estimated (and does not fail on sampling error
   # in tau).
@@ -65,7 +65,7 @@ test_that("a new group adds a group channel recovering tau^2", {
   tau_hat <- mean(dm[, "sd_g__Intercept"])
   expect_equal(mean(dec$group_var), tau_hat^2, tolerance = 0.5)
 
-  # Budget closes WITH the new channel included.
+  # Budget closes WITH the new component included.
   expect_budget_closes(dec, pred = pred)
 })
 

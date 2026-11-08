@@ -28,10 +28,10 @@
 #'     the in-sample / out-of-sample distinction handled explicitly. Predicting
 #'     for a group the fit has \emph{seen} uses that group's estimated effect:
 #'     the effect is a parameter, its posterior uncertainty is part of
-#'     \code{param_var}, and there is no separate group channel (conditioning on
+#'     \code{param_var}, and there is no separate group component (conditioning on
 #'     a known group \emph{reduces} predictive variance relative to the
 #'     population level). Predicting for a \emph{new} level integrates over the
-#'     group-level distribution and adds a \code{group_var} channel carrying the
+#'     group-level distribution and adds a \code{group_var} component carrying the
 #'     between-group variance; \code{\link{et_predict}} detects new levels
 #'     automatically. The \code{grouping} argument here is a \emph{separate}
 #'     device: it fits one independent model per group (no pooling), not a
@@ -308,7 +308,7 @@ et_fit <- function(formula,
 # lets the posterior straddle |phi| >= 1, and the k-step-ahead forecast variance
 # sigma^2 (1 - phi^(2k)) / (1 - phi^2) then diverges. The downstream symptoms are
 # a heavy-tailed predictive distribution, a temporal_var that swamps every other
-# channel, and a shelf-life ratio that explodes.
+# component, and a shelf-life ratio that explodes.
 #
 # Defaults:
 #   "weakly_informative" (default) -- normal(0, 0.5), which places ~95% of the
@@ -524,7 +524,7 @@ et_fit <- function(formula,
 #'
 #' @section What the pipeline reads off the fit:
 #' Four things: the posterior draws; the response family, for the variance
-#' function of the residual channel; the model formula, to find the response
+#' function of the residual component; the model formula, to find the response
 #' column and to detect an \code{ar()}-family term; and the training data, to
 #' continue an autocorrelated series forward and to set the default
 #' \code{response_scale} in \code{\link{shelf_life}}. A \code{brmsfit} carries
