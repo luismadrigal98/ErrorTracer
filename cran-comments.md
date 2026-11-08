@@ -2,12 +2,15 @@
 
 This release (1.4.3) changes one default so that the variance budget is as
 tight as the fit allows. The version on CRAN is 1.3.1, so this submission also
-carries the 1.4.2, 1.4.1 and 1.4.0 material; none of those was accepted. The
-changes are listed newest first.
+carries the 1.4.2, 1.4.1 and 1.4.0 material. 1.4.1 and 1.4.0 were not
+accepted; 1.4.2 was submitted on 5 November 2026 and is, as far as I know,
+still awaiting manual inspection. If it is preferable for that submission to be
+processed first, or for this one to replace it, I will do whichever the team
+prefers. The changes are listed newest first.
 
 **Please note two changes in default output and one in reproducibility.**
 `decompose_uncertainty()` now reports `total_var` as the *measured* posterior
-predictive variance rather than the sum of its channels, and `temporal_var` as
+predictive variance rather than the sum of its components, and `temporal_var` as
 a signed remainder rather than a floored one. `et_predict()` now seeds its own
 draws. All three correct results that were wrong rather than merely
 conservative: **any variance budget, credible interval, PIT, calibration or
@@ -19,7 +22,7 @@ affected only at the level of Monte Carlo error.
 
 `et_predict(n_draws =)` defaulted to 2000 draws even when the fit held many
 more. Since 1.4.0 `total_var` is the *measured* variance of the predictive
-draws rather than the sum of its channels, so for an iid model the reported
+draws rather than the sum of its components, so for an iid model the reported
 `closure_gap` is exactly the Monte Carlo error of that measurement.
 Subsampling therefore widened the gap for no benefit, because the draws are
 paid for during sampling and prediction is matrix work. On a 90-observation
@@ -32,6 +35,22 @@ changes reported numbers**: a decomposition, interval, PIT, calibration or
 shelf life from the old default is a noisier estimate of the same quantity,
 not a different one.
 
+### 1.4.3 also refuses a combination it used to accept
+
+`brms` carries an autocorrelation term as response residuals for `gaussian` and
+`student`, but as a vector of *latent* residuals for every other family under
+its default `cov = FALSE`, and it cannot extend latent residuals to new rows.
+So `et_fit(y ~ x + ar(time = t), family = poisson())` sampled successfully and
+`et_predict()` then failed inside `brms` with "Cannot predict new latent
+residuals". **`et_fit()` and `et_predict()` now stop on that combination**,
+before Stan is invoked, naming `cov = TRUE` as the fix; `brms` offers the
+covariance formulation at order one only, which the message also states.
+Gaussian and student models are untouched: a Portal-style `ar(cov = FALSE)`
+fit predicts bit-identically before and after this change. The `cov = TRUE`
+path is permitted and now warns that its
+driver-inclusive draws are not guaranteed to respect the response support: on a
+small-count Poisson fit 12.3% were negative and all were non-integer.
+
 ## 1.4.2 — a model fitted outside the package can now be used
 
 `as_et_model()` wraps an existing `brms` fit in the object `et_fit()` returns,
@@ -42,7 +61,7 @@ the variance accounting. Bare Stan objects are refused with the
 carry neither the family, the formula, nor the training data the decomposition
 reads.
 
-Three changes to plot output. `et_plot_decomposition(proportional = TRUE)` now normalises each component by the channels actually drawn, so the bars are true shares summing to 1 and the axis is a percentage; previously it divided by `total_var` while drawing only the named channels, which left iid bars short of 1 by the closure gap. Tick labels are now angled based on the labels themselves rather than on the x variable, so long group names no longer collide.
+Three changes to plot output. `et_plot_decomposition(proportional = TRUE)` now normalises each component by the components actually drawn, so the bars are true shares summing to 1 and the axis is a percentage; previously it divided by `total_var` while drawing only the named components, which left iid bars short of 1 by the closure gap. Tick labels are now angled based on the labels themselves rather than on the x variable, so long group names no longer collide.
 
 Two further changes to plot output. `et_plot_*()` no longer sets a default title: these figures are made for manuscripts, where the caption is typeset by the journal, and a title in the image duplicates it. Axis labels, legend titles and facet strips are unchanged, and a title is still available through `+ labs(title = )`.
 
@@ -124,8 +143,8 @@ failed on the oldrel CRAN checks. It is now defined in `R/utils.R`.
   is meaningful, since autocorrelated errors can reduce predictive variance
   relative to an independent-innovation baseline.
 * **New `closure_gap` column for iid models**, reporting the shortfall rather
-  than folding it into a channel, with `v_env_mcse` alongside `env_var` so the
-  zero-floor on that channel warns when it fires beyond twice its Monte Carlo
+  than folding it into a component, with `v_env_mcse` alongside `env_var` so the
+  zero-floor on that component warns when it fires beyond twice its Monte Carlo
   error.
 
 ## Test environments
@@ -137,7 +156,7 @@ failed on the oldrel CRAN checks. It is now defined in `R/utils.R`.
 
 `R CMD check --as-cran --run-donttest` on the built tarball, R 4.6.2 on Linux:
 
-0 errors | 0 warnings | 1 note
+0 errors | 0 warnings | 2 notes
 
 **Note, slow examples.** The expected note for a Stan-backed package: six
 examples each fit one Bayesian model, so almost all of that time is Stan model
@@ -145,19 +164,19 @@ examples each fit one Bayesian model, so almost all of that time is Stan model
 observations, one predictor, a single chain of 500 iterations, of which
 sampling accounts for under a second), so the cost is not reducible by
 shrinking them further. They are wrapped in `\donttest{}`. Measured elapsed
-times for this submission: `as_et_model` 54.4s, `shelf_life` 50.2s,
-`decompose_uncertainty` 49.1s, `et_calibrate` 48.9s, `et_priors_split` 47.2s,
-`et_fit` 47.1s (298s in total). An equivalent note was present in the previously accepted
-releases.
+times for this submission: `as_et_model` 53.1s, `decompose_uncertainty`
+50.5s, `shelf_life` 46.5s, `et_calibrate` 46.5s, `et_priors_split` 45.6s,
+`et_fit` 45.5s (290s in total). An equivalent note was present in the
+previously accepted releases.
 
-The incoming checks may additionally raise a "days since last update" note,
-since this release follows closely on the previous one. That reflects
+**Note, submission cadence.** The incoming check reports "Days since last
+update: 3. Number of updates in past 6 months: 7." That reflects
 submission cadence rather than a code issue; if it is too soon I am happy to
 wait and resubmit, and would welcome being told the preferred interval.
 
 For context on total check time: the `testthat` suite is gated with
-`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (722
-tests across 22 files locally with `NOT_CRAN=true`, 0 failures, 0 skips; the
+`skip_on_cran()`, so it runs in a few seconds under CRAN's settings (758
+tests across 23 files locally with `NOT_CRAN=true`, 0 failures, 0 skips; the
 suite grew from 572 at 1.3.1 as each defect below was pinned by a regression
 test). Vignettes do not fit models at build time.
 
